@@ -1,0 +1,9 @@
+Script Daily Active Directory DCs full dcdiag
+
+#JORGE NAVARRO MANZANO
+#Script Daily Active Directory DCs full dcdiag
+#checking "failed test" #execute dcdiags remotely in every dc and sent mail to the email address
+#https://es.linkedin.com/in/jorgenavarro
+
+view and download here:
+https://gallery.technet.microsoft.com/Script-Daily-Active-319b33c1
