@@ -1,0 +1,7 @@
+Script Compare W32TIME
+
+#JORGE NAVARRO MANZANO
+Script Compare W32TIME
+Time Date between central node and remote nodes
+#get localdate and compare with several remote nodes, if there is a diference in one or more of +- 60 seconds, script sends mail
+#https://es.linkedin.com/in/jorgenavarromanzano
