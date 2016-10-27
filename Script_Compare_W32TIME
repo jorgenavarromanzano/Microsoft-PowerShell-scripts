@@ -4,7 +4,7 @@ Script Compare W32TIME
 #Script Compare W32TIME
 #Time Date between central node and remote nodes
 #get localdate and compare with several remote nodes, if there is a diference in one or more of +- 60 seconds, script sends mail
-#https://es.linkedin.com/in/jorgenavarromanzano
+#https://linkedin.com/in/jorgenavarromanzano
 
 #view and download here:
 https://gallery.technet.microsoft.com/Script-Compare-W32TIME-5835f538
