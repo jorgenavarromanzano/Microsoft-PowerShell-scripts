@@ -1,7 +1,2966 @@
-Script Doc Windows Server 20XX
-JORGE NAVARRO MANZANO Script Doc Windows Server 20XX
-https://es.linkedin.com/in/jorgenavarromanzano
-it creates two files nodename.html and nodename.txt (tiki format) lot info, like hw, devices, services, programs, updates, env, app infos, nlb, cluster, iis, ad, dns, dhcp, etc.
+#JORGE NAVARRO MANZANO Script Doc Windows Server 20XX, needs .net 2.0 and powershell 2.0(check version with get-host)
+#https://linkedin.com/in/jorgenavarromanzano
+#more scripts here https://github.com/jorgenavarromanzano
+#it creates two files nodename.html (in html format) and nodename.txt (tikiwiki format http://tiki.org)
+#lot of info, like hw, devices, services, programs, updates, env, app infos, nlb, cluster, iis, ad, dns, dhcp, etc etc.
+#used functions of productkeys for windows and sql from JAKOB BINDSLET and Chrissy LeMaire
+#only compatible with english/spanish windows servers(you can run it in other languages but some string filters wont work)
+#see html outputs examples in the zip file
 
-view and download here:
-https://gallery.technet.microsoft.com/Script-Doc-Windows-Server-17168b1d
+#Instructions:
+#run as an administrator user powershell and copy all code
+#can also be runned from an automation tool(please be sure your automation tool works fine, dont reboot the server after execution etc)
+#user with local system the output folder will be C:\Windows\system32\config\systemprofile
+#also you can uncomment this folder so the output will be copied there
+#make sure to add everyone permissions change share/write ntfs temporarily to the folder
+#if local system user used as it doesnt have network permissions
+#it depends of the automation tool but maybe you need to enable remote execution of .ps files set-executionpolicy unrestricted
+#$outputsharefolder = "\\192.168.1.1\temp"
+
+#numoutperformance number of performance statistics lines, default 10, can be infinite/99999 to generate a big performance report
+$numoutperformance = 10
+
+#if you want the script to copy the .txt and .html files to the directory of your pc from where you connect by rdp to the servers, just change the next folder:
+#(need rdp drive redirection enabled)
+#example: $locationdir = "\\tsclient\C\users\che\desktop\"
+$locationdir = "\\tsclient\C\users\che\desktop\"
+$locationexist = get-childitem $locationdir -ErrorAction silentlycontinue
+$error.clear()
+
+if($locationexist -ne $null)
+{
+	set-location $locationdir
+}
+
+#INFO: #always #?optional only if exists
+
+#Server Info
+#ProductKeys
+#Hardware
+	#Devices
+	#?Remote Console requieres hponcfg
+#Performance
+#ENV
+#Eventlog
+#Startup Programs
+#Net
+	#ipconfig
+	#?nicteaming
+	#?MTU -> w2008 and earlier
+	#routes
+	#hosts file
+	#ntpclient
+	#other
+	#netstat
+#?NLB
+#?Cluster
+#Shares-Mapped Drives
+#ODBC
+#?Roles-Features
+#Programs
+#Updates
+#?IIS-FTP-SMTP
+#?HyperV
+#?RDS
+#?PrintServer
+#?Terminal Server
+#?NPS
+#?RAS
+#Services
+	#Info Services
+#Local Users/Groups/Policies
+#?SQL Server -> user need to has access/permissions to SQL and pssnapin SqlServerCmdletSnapin100
+#?DNS Server
+#?DHCP Server
+#?Printers
+#?Active Directory
+	#Stats
+	#DCS
+	#Sites
+	#Trusts
+	#Authorized DHCP Servers
+	#DCDIAG
+#Tasks
+#Review
+#Server Description add manually
+#Service Check add manually
+#Notes add manually
+
+#changes (only after 202004)
+#changes20200424
+	#add nic teaming
+	#add w2019
+	#add pending updates
+#changes20200428
+	#added info allservices
+	#changed tiki first sections
+#changes20200512
+	#added support automation tools output in $home of the user (usually local system is in C:\Windows\system32\config\systemprofile)
+	#changed copy to rdp folder
+	#added option to copy output to a shared folder
+#changes20200513
+	#modified updates section (some errors because of wrong values in installedon value)
+	#notranscript if run from automation tool (because it fails with hp server automation)
+#changes20200520
+	#added variable $numoutperformance for generating big performance report of servers
+	
+#todo
+	#add ntfs blocksize Get-WmiObject -Class Win32_Volume | Select-Object caption,Label, BlockSize | Format-Table -AutoSize
+
+if(test-path $env:userprofile\desktop)
+{
+	cd $env:userprofile\desktop
+}elseif(test-path $env:userprofile\escritorio)
+{
+	cd $env:userprofile\escritorio
+}else{
+	cd $home
+	$transcript = 0
+}
+if($env:userprofile -eq "C:\Documents and Settings\Default User")
+{
+	$transcript = 0
+}
+if($transcript -ne 0)
+{
+	start-transcript $pwd\docwindows_log.txt
+}
+
+$revision = @()
+$functions = $functions+" Functions: "
+
+$powershellv = (get-host).version.major
+
+$fecha = get-date
+$name = hostname
+$fichero = New-Object System.IO.StreamWriter $pwd\$name".txt"
+$ficherohtml = New-Object System.IO.StreamWriter $pwd\$name".html"
+
+$fichero.writeline("{DIV(float=>left,bg=>lightyellow,width=>40%)}")
+$fichero.writeline("{maketoc}{DIV}")
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Server Description")
+$fichero.writeline("")
+$fichero.writeline("")
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Service Check")
+$fichero.writeline("")
+$fichero.writeline("")
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Notes")
+$fichero.writeline("")
+$fichero.writeline("")
+
+$fichero.writeline("!#Server Info")
+$ficherohtml.writeline("<A name=Server Info></A>")
+$ficherohtml.writeline("<H3>Server Info</H3>")
+$domain = (get-wmiobject -class WIN32_ComputerSystem -property Domain).Domain
+$fichero.writeline("Server:"+$domain+"\"+$name)
+$ficherohtml.writeline("Server:"+$domain+"\"+$name+"<br>")
+$fichero.writeline("LogonServer:"+$env:logonserver)
+$ficherohtml.writeline("LogonServer:"+$env:logonserver+"<br>")
+if((Get-WmiObject -class Win32_ComputerSystem).domainrole -gt 2)
+{
+	$searcher = new-object System.DirectoryServices.DirectorySearcher([ADSI]'')
+	$searcher.filter = "(&(objectClass=computer) (CN=$name))"
+	$computerdn = $searcher.findall()
+	$computerdn = $computerdn[0].path
+	if($computerdn -like "*$name*")
+	{
+		$fichero.writeline($computerdn.substring(7))
+		$ficherohtml.writeline($computerdn.substring(7)+"<br>")
+	}
+}
+
+$so = (get-wmiobject -class Win32_Operatingsystem -property caption).caption
+$arqexists = get-wmiobject -class win32_operatingsystem
+if($arqexists.osarchitecture -ne $null)
+{
+	$arq = (get-wmiobject -class Win32_OperatingSystem -property OSArchitecture).OSArchitecture
+}
+$sp = (get-wmiobject -class Win32_OperatingSystem -property ServicePackMajorVersion).ServicePackMajorVersion
+$fichero.writeline("OS: "+$so+" | SP:"+$sp+" | "+$arq)
+$ficherohtml.writeline("OS: "+$so+" | SP:"+$sp+" | "+$arq+"<br>")
+
+if($so -notlike "*2003*")
+{
+	$activwindows = Get-wmiobject -Class SoftwareLicensingProduct |Where {$_.ApplicationID -eq "55c92734-d682-4d71-983e-d6ec3f16059f" -AND $_.PartialProductKey -ne $null}
+	if($activwindows.licensestatus -eq 1)
+	{
+		$activadowindows = "YES"
+	}else{
+		$activadowindows = "NO"
+	}
+	if($activwindows.EvaluationEndDate -eq "16010101000000.000000-000")
+	{
+		$evaluationenddate = "NEVER"
+	}else{
+		$evaluationenddate = $activwindows.EvaluationEndDate
+	}
+	$fichero.writeline("Windows Activation: "+$activwindows.description+" | Activated: "+$activadowindows+" | EvaluationEndDate: "+$evaluationenddate+" | PartialProductKey: "+$activwindows.PartialProductKey)
+	$ficherohtml.writeline("Windows Activation: "+$activwindows.description+" | Activated: "+$activadowindows+" | EvaluationEndDate: "+$evaluationenddate+" | PartialProductKey: "+$activwindows.PartialProductKey+"<br>")
+}
+
+$culture = (get-culture).displayname
+$uiculture = (get-uiculture).displayname
+$timezone = (get-WMIObject -class Win32_TimeZone).description
+$fichero.writeline("Culture: "+$culture+" | Language: "+$uiculture+" | TimeZone: "+$timezone)
+$ficherohtml.writeline("Culture: "+$culture+" | Language: "+$uiculture+" | TimeZone: "+$timezone+"<br>")
+
+$installdate = (get-wmiobject -class Win32_OperatingSystem -property InstallDate).InstallDate
+$installdate = [management.managementDateTimeConverter]::ToDateTime($installdate)
+$boottime = (get-wmiobject -class Win32_OperatingSystem -property lastbootuptime).lastbootuptime
+$boottime = [management.managementDateTimeConverter]::ToDateTime($boottime)
+$fichero.writeline("Install Date: "+$installdate+" | Boot Time: "+$boottime)
+$ficherohtml.writeline("Install Date: "+$installdate+" | Boot Time: "+$boottime+"<br>")
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#ProductKeys")
+$ficherohtml.writeline("<A name=ProductKeys></A>")
+$ficherohtml.writeline("<H3>ProductKeys</H3>")
+
+#windowskey
+if($so -like "*2003*")
+{
+	$map="BCDFGHJKMPQRTVWXY2346789"
+	$sokey = Get-WmiObject -class Win32_OperatingSystem
+	$Reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine,$name)
+	If($sokey.OSArchitecture -like '*64*')
+	{
+		$value = $Reg.OpenSubKey("SOFTWARE\Microsoft\Windows NT\CurrentVersion").GetValue('DigitalProductId4')[0x34..0x42]
+	}else{
+		$value = $Reg.OpenSubKey("SOFTWARE\Microsoft\Windows NT\CurrentVersion").GetValue('DigitalProductId')[0x34..0x42]
+	}
+	for ($i = 24; $i -ge 0; $i--)
+	{
+		$r = 0
+		for ($j = 14; $j -ge 0; $j--)
+		{
+			$r = ($r * 256) -bxor $value[$j]
+			$value[$j] = [math]::Floor([double]($r/24))
+			$r = $r % 24
+		}
+		$pkwindows = $map[$r] + $pkwindows
+		if (($i % 5) -eq 0 -and $i -ne 0)
+		{
+			$pkwindows = "-" + $pkwindows
+		}
+	}
+	$fichero.writeline("Windows ProductKey: "+$pkwindows+ " | OS: "+$so)
+	$ficherohtml.writeline("Windows ProductKey: "+$pkwindows+ " | OS: "+$so+"<br>")
+}else{
+	$fichero.writeline("Windows PartialProductKey: "+$activwindows.PartialProductKey+ " | OS: "+$so)
+	$ficherohtml.writeline("Windows PartialProductKey: "+$activwindows.PartialProductKey+ " | OS: "+$so+"<br>")
+}
+
+#sqlkey
+Function SQLKey {
+param([byte[]]$data,[int]$version)
+	if ($version -ge 11)
+	{
+		$binArray = ($data)[0..66]
+	}else{
+		$binArray = ($data)[52..66]
+	}
+	$charsArray = "B","C","D","F","G","H","J","K","M","P","Q","R","T","V","W","X","Y","2","3","4","6","7","8","9"
+	for ($i = 24; $i -ge 0; $i--)
+	{
+		$k = 0
+		for ($j = 14; $j -ge 0; $j--)
+		{
+			$k = $k * 256 -bxor $binArray[$j]
+			$binArray[$j] = [math]::truncate($k / 24)
+			$k = $k % 24
+		}
+		$pksql = $charsArray[$k] + $pksql
+		if (($i % 5 -eq 0) -and ($i -ne 0))
+		{
+			$pksql = "-" + $pksql
+		}
+	}
+	return $pksql
+}
+
+if(test-path -path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\")
+{
+	$wmi = [WMIClass]"\\.\root\default:stdRegProv"
+	$regValue1 = "DigitalProductId"
+	$regValue2 = "PatchLevel"
+	$regValue3 = "Edition"
+	$hklm = 2147483650
+	if(test-path -path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\90\Tools\Setup")
+	{
+		$regPath = "SOFTWARE\Microsoft\Microsoft SQL Server\90\Tools\Setup"
+		$regdpid = "SOFTWARE\Microsoft\Microsoft SQL Server\90\ProductID"
+        [string]$SQLver = $wmi.GetstringValue($hklm,$regPath,$regValue2).svalue
+        [string]$SQLedition = $wmi.GetstringValue($hklm,$regPath,$regValue3).svalue
+		$dpid = $wmi.enumvalues($hklm,$regdpid).snames | ? {$_ -like "DigitalProduct*"}
+		if($dpid -ne $null)
+		{
+			$data = $wmi.GetBinaryValue($hklm,$regdpid,$dpid)
+			if($data.uvalue -ne $null)
+			{
+				$pksql = SQLKey $data.uvalue 10
+				$fichero.writeline("SQL 2005/2005R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver)
+				$ficherohtml.writeline("SQL 2005/2005R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver+"<br>")
+			}
+		}else{
+			$fichero.writeline("SQL 2005/2005R2 can't get ProductKey there is no key HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\90\ProductID")
+			$ficherohtml.writeline("SQL 2005/2005R2 can't get ProductKey there is no key HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\90\ProductID<br>")
+		}
+	}
+	if(test-path -path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\100\Tools\Setup")
+	{
+		$regPath = "SOFTWARE\Microsoft\Microsoft SQL Server\100\Tools\Setup"
+        $data = $wmi.GetBinaryValue($hklm,$regPath,$regValue1)
+        [string]$SQLver = $wmi.GetstringValue($hklm,$regPath,$regValue2).svalue
+        [string]$SQLedition = $wmi.GetstringValue($hklm,$regPath,$regValue3).svalue
+		if($data.uvalue -ne $null)
+		{
+			$pksql = SQLKey $data.uvalue 10
+			$fichero.writeline("SQL 2008/2008R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver)
+			$ficherohtml.writeline("SQL 2008/2008R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver+"<br>")
+		}
+	}
+	if(test-path -path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\110\Tools\Setup")
+	{
+		$regPath = "SOFTWARE\Microsoft\Microsoft SQL Server\110\Tools\Setup"
+		$data = $wmi.GetBinaryValue($hklm,$regPath,$regValue1)
+        [string]$SQLver = $wmi.GetstringValue($hklm,$regPath,$regValue2).svalue
+        [string]$SQLedition = $wmi.GetstringValue($hklm,$regPath,$regValue3).svalue
+		if($data.uvalue -ne $null)
+		{
+			$pksql = SQLKey $data.uvalue 11
+			$fichero.writeline("SQL 2012/2012R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver)
+			$ficherohtml.writeline("SQL 2012/2012R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver+"<br>")
+		}
+	}
+	if(test-path -path "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\120\Tools\Setup")
+	{
+		$regPath = "SOFTWARE\Microsoft\Microsoft SQL Server\120\Tools\Setup"
+		$data = $wmi.GetBinaryValue($hklm,$regPath,$regValue1)
+        [string]$SQLver = $wmi.GetstringValue($hklm,$regPath,$regValue2).svalue
+        [string]$SQLedition = $wmi.GetstringValue($hklm,$regPath,$regValue3).svalue
+		if($data.uvalue -ne $null)
+		{
+			$pksql = SQLKey $data.uvalue 12
+			$fichero.writeline("SQL 2014/2014R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver)
+			$ficherohtml.writeline("SQL 2014/2014R2 ProductKey: "+$pksql+" | Edition: "+$sqledition+" | Version: "+$sqlver+"<br>")
+		}
+	}
+}
+
+#vmwarekeys
+$vcenterservices = @()
+$vcenterservices += (get-service -displayname "*VirtualCenter*" | ? {$_.Status -eq "Running"})
+if($vcenterservices.count -gt 0 -and (get-service -displayname "*VirtualCenter*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	Add-PSSnapin VMware.VimAutomation.Core -ErrorAction SilentlyContinue
+	if($error[0] -like "*snap*")
+	{
+		$error.Remove($error[0])
+		$fichero.writeline("VMware Licenses: VMware Powercli not installed")
+		$ficherohtml.writeline("VMware Licenses: VMware Powercli not installed:<br>")
+	}else{
+		#VMware vCenter connection, if your user does not have permission to connect, insert a user and password who has permission
+		write-host "VMware vCenter connection, if your user does not have permission to connect, insert a user and password who has permission"
+		connect-viserver localhost -WarningAction SilentlyContinue -erroraction SilentlyContinue
+		if($error[0] -like "*connect-viserver*")
+		{
+			$error.Remove($error[0])
+			$fichero.writeline("VMware Licenses: No permission to connect to vCenter, check user and password")
+		}else{
+			$fichero.writeline("VMware Licenses:")
+			$ficherohtml.writeline("VMware Licenses:<br>")
+			$fichero.writeline("Name | Key | Total | Used | Information")
+			$ficherohtml.writeline("Name | Key | Total | Used | Information:<br>")
+			$vmSI=Get-View ServiceInstance
+			$vmwarekeys=Get-View $vmSI.Content.LicenseManager
+			Foreach($vmwarekey in $vmwarekeys.Licenses)
+			{
+				foreach ($vmwarekeylabel in $vmwarekey.labels)
+				{
+					$vmwarekeyinfo = $vmwarekeylabel.value
+				}
+				$fichero.writeline($vmwarekey.Name+" | "+$vmwarekey.LicenseKey+" | "+$vmwarekey.total+" | "+$vmwarekey.Used+" | "+$vmwarekeyinfo)
+				$ficherohtml.writeline($vmwarekey.Name+" | "+$vmwarekey.LicenseKey+" | "+$vmwarekey.total+" | "+$vmwarekey.Used+" | "+$vmwarekeyinfo+"<br>")
+			}
+		}
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Hardware")
+$ficherohtml.writeline("<A name=Hardware></A>")
+$ficherohtml.writeline("<H3>Hardware</H3>")
+
+$marca = (get-wmiobject -class Win32_BIOS -property Manufacturer).Manufacturer
+$modelo = (get-wmiobject -class Win32_ComputerSystem -property Model).Model
+$bios = (get-wmiobject -class Win32_BIOS -property SMBIOSBIOSVersion).SMBIOSBIOSVersion
+$sn = (get-wmiobject -class Win32_BIOS -property SerialNumber).SerialNumber
+$fichero.writeline("Manufacturer: "+$marca+" | Model: "+$modelo+" | Bios: "+$bios+" | S/N: "+$sn)
+$ficherohtml.writeline("Manufacturer: "+$marca+" | Model: "+$modelo+" | Bios: "+$bios+" | S/N: "+$sn+"<br>")
+
+foreach ($win32cpu in (get-wmiobject -class Win32_Processor))
+{
+	$cpu = $win32cpu.Name
+	$cpuspeed = $win32cpu.MaxClockSpeed
+}
+if($win32cpu.NumberOfLogicalProcessors -eq $null)
+{
+	$cores = (get-wmiobject -class Win32_Processor).count
+	if($cores -eq $null)
+	{
+		$cores = 1
+	}
+}else{
+	$cores =  (get-WmiObject Win32_processor | measure-object -property Numberoflogicalprocessors -sum).sum
+}
+
+if((get-WmiObject Win32_processor).NumberOfcores -ne $null)
+{
+	$coresfisicos = (get-WmiObject Win32_processor | measure-object -property NumberOfcores -sum).sum
+}
+if($coresfisicos -ne $null)
+{
+	if(($cores / $coresfisicos) -eq 2)
+	{
+		$ht = "Yes"
+	}else{
+		$ht = "No"
+	}
+}else{
+	$ht = "No"
+}
+$intelvtstatus = "off"
+foreach ($intelvt in (Get-WmiObject -class win32_processor).VirtualizationFirmwareEnabled)
+{
+	if($intelvt -eq $true)
+	{
+		$intelvtstatus = "on"
+	}
+}
+
+$fichero.writeline("CPU: "+$cpu+" | x "+$cores+" | "+$cpuspeed+" mhz | HT: "+$ht+" | IntelVT: "+$intelvtstatus)
+$ficherohtml.writeline("CPU: "+$cpu+" | x "+$cores+" | "+$cpuspeed+" mhz | HT: "+$ht+" | IntelVT: "+$intelvtstatus+"<br>")
+
+$ram = [int]((get-wmiobject -class Win32_ComputerSystem -property TotalPhysicalMemory).TotalPhysicalMemory / 1024 /1024)
+$fichero.writeline("RAM: "+$ram+"MB")
+$ficherohtml.writeline("RAM: "+$ram+"MB"+"<br>")
+
+$discos = get-wmiobject -class Win32_DiskDrive
+foreach ($disco in $discos)
+{
+	$total = [int]($disco.size / 1024 / 1024 / 1024)
+	$fichero.writeline($disco.Name+" | TotalGB: "+$total)
+	$ficherohtml.writeline($disco.Name+" | TotalGB: "+$total+"<br>")
+}
+
+$particiones = get-wmiobject -class Win32_LogicalDisk | ? {$_.DriveType -eq 3}
+$totalparticiones = 0
+$ocupadoparticiones = 0
+foreach ($particion in $particiones)
+{
+	$total = [int]($particion.size / 1024 / 1024 / 1024)
+	$libre = [int]($particion.freespace / 1024 / 1024 / 1024)
+	
+	$totalparticiones += $total
+	$ocupado = $total - $libre
+	$ocupadoparticiones += $ocupado
+	
+	if($libre -lt 2)
+	{
+		$revision += $particion.caption+" less 2GB free | FreeGB: "+$libre
+	}
+	$fichero.writeline($name +" | "+$particion.caption+" | "+$particion.volumename+" | TotalGB: "+$total+" | FreeGB: "+$libre+" | SN: "+$particion.VolumeSerialNumber)
+	$ficherohtml.writeline($name +" | "+$particion.caption+" | "+$particion.volumename+" | TotalGB: "+$total+" | FreeGB: "+$libre+" | SN: "+$particion.VolumeSerialNumber+"<br>")
+}
+$fichero.writeline("............")
+$ficherohtml.writeline("............<br>")
+$fichero.writeline("TotalGB: "+$totalparticiones+" | OccupiedGB: "+$ocupadoparticiones)
+$ficherohtml.writeline("TotalGB: "+$totalparticiones+" | OccupiedGB: "+$ocupadoparticiones+"<br>")
+
+foreach ($pagefile in (get-wmiobject -class Win32_PageFile))
+{
+	$fichero.writeline($pagefile.caption+" | size "+[int]($pagefile.filesize/1024/1024)+" | minimum "+$pagefile.InitialSize+" | maximum "+$pagefile.maximumsize)
+	$ficherohtml.writeline($pagefile.caption+" | size "+[int]($pagefile.filesize/1024/1024)+" | minimum "+$pagefile.InitialSize+" | maximum "+$pagefile.maximumsize+"<br>")
+}
+
+$fichero.writeline("!!#Devices:")
+$ficherohtml.writeline("<A name=Devices></A>")
+$ficherohtml.writeline("<H3>Devices</H3>")
+$devices = gwmi Win32_PnPSignedDriver
+
+$fichero.writeline("__NICs:__")
+$ficherohtml.writeline("<b>NICs:</b><br>")
+$hwnics = $devices | ? {$_.DeviceClass -eq "NET" -and $_.Manufacturer -ne "Microsoft" -and $_.Manufacturer -ne "McAfee"} | Sort DeviceName
+$hwnics_speed = Get-WmiObject -class win32_networkadapter
+foreach ($hwnic in $hwnics)
+{
+	foreach ($hwnic_speed in $hwnics_speed)
+	{
+		if($hwnic_speed.pnpdeviceid -eq $hwnic.deviceid)
+		{
+			$hwnic_descriptionso = $hwnic_speed.NetConnectionID
+			if($hwnic_speed.speed -eq $null)
+			{
+				if($hwnic_speed.netconnectionstatus -eq 2)
+				{
+					$nic_speed = "link but WMI shows no speed"
+				}else{
+					$nic_speed = "no link"
+				}
+			}else{
+				if($hwnic_speed.speed -eq 9223372036854775807)
+				{
+					$nic_speed = "no link"
+				}else{
+					$nic_speed = $hwnic_speed.speed/1000000
+				}
+			}
+		}
+	}
+	$fichero.writeline($hwnic.DeviceName+" | "+$hwnic_descriptionso+" | SpeedMB:"+$nic_speed+" | "+$hwnic.Manufacturer+" | Driver: "+$hwnic.DriverVersion+" | DriverDate: "+$hwnic.DriverDate+" | "+$hwnic.Location)
+	$ficherohtml.writeline($hwnic.DeviceName+" | "+$hwnic_descriptionso+" | SpeedMB:"+$nic_speed+" | "+$hwnic.Manufacturer+" | Driver: "+$hwnic.DriverVersion+" | DriverDate: "+$hwnic.DriverDate+" | "+$hwnic.Location+"<br>")
+}
+
+$fichero.writeline("__SCSI/RAID controllers:__")
+$ficherohtml.writeline("<br><b>SCSI/RAID controllers:</b><br>")
+$hwcontroladoras = $devices | ? {$_.DeviceClass -eq "SCSIADAPTER"} | Sort DeviceName
+foreach ($hwcontroladora in $hwcontroladoras)
+{
+	$fichero.writeline($hwcontroladora.DeviceName+" | "+$hwcontroladora.Manufacturer+" | Driver: "+$hwcontroladora.DriverVersion+" | DriverDate: "+$hwcontroladora.DriverDate+" | "+$hwcontroladora.PDO+" | "+$hwcontroladora.Location)
+	$ficherohtml.writeline($hwcontroladora.DeviceName+" | "+$hwcontroladora.Manufacturer+" | Driver: "+$hwcontroladora.DriverVersion+" | DriverDate: "+$hwcontroladora.DriverDate+" | "+$hwcontroladora.PDO+" | "+$hwcontroladora.Location+"<br>")
+}
+
+if((Get-WmiObject -Class "MSFC_FCAdapterHBAAttributes" -List -Namespace "root\WMI") -ne $null)
+{
+	if((Get-WmiObject -class MSFC_FCAdapterHBAAttributes -namespace "root\WMI" -ErrorAction SilentlyContinue) -eq $null)
+	{
+		if($error[0] -like "*Incompatible*" -or $error[0] -like "*Not Supported*")
+		{
+			$error.Remove($error[0])
+		}
+	}else{
+		$hba = 1
+		$fichero.writeline("__HBAS:__")
+		$ficherohtml.writeline("<br><b>HBAS:</b><br>")
+		$hwhbas = @()
+		$hwhbas += Get-WmiObject -class MSFC_FCAdapterHBAAttributes -namespace "root\WMI" -ErrorAction SilentlyContinue
+		foreach ($hwhba in $hwhbas)
+		{
+			$hwhbaportwwns = Get-WmiObject -class MSFC_FibrePortHBAAttributes -namespace "root\WMI" | ? {$_.InstanceName -eq $hwhba.InstanceName} | Select -Expandproperty Attributes | % { ($_.PortWWN | % {"{0:x2}" -f $_}) -join ":"}
+			$fichero.writeline($hwhba.ModelDescription+" | "+$hwhba.NodeSymbolicName+" | "+$hwhba.Manufacturer+" | Ports: "+$hwhba.NumberOfPorts+" | Driver: "+$hwhba.DriverVersion+" | Firmware: "+$hwhba.FirmwareVersion+" | S/N: "+$hwhba.SerialNumber)
+			$ficherohtml.writeline($hwhba.ModelDescription+" | "+$hwhba.NodeSymbolicName+" | "+$hwhba.Manufacturer+" | Ports: "+$hwhba.NumberOfPorts+" | Driver: "+$hwhba.DriverVersion+" | Firmware: "+$hwhba.FirmwareVersion+" | S/N: "+$hwhba.SerialNumber+"<br>")
+			foreach($hwhbaportwwn in $hwhbaportwwns)
+			{
+				$fichero.writeline("PortWWN: "+$hwhbaportwwn)
+				$ficherohtml.writeline("PortWWN: "+$hwhbaportwwn+"<br>")
+			}
+		}
+	}
+}
+
+if((Get-WmiObject -Namespace root\wmi -list "MPIO_DISK_INFO").name -eq "MPIO_DISK_INFO")
+{
+	$fichero.writeline("__MPIO:__")
+	$ficherohtml.writeline("<br><b>MPIO:</b><br>")
+	$mpios = (get-wmiobject -Namespace root\wmi -Class mpio_disk_info).driveinfo
+	foreach($mpio in $mpios)
+	{
+		$fichero.writeline($mpio.Name + " | Paths:" +$mpio.NumberPaths + " | " + $mpio.DsmName + " | " + $mpio.SerialNumber)
+		$ficherohtml.writeline($mpio.Name + " | Paths:" +$mpio.NumberPaths + " | " + $mpio.DsmName + " | " + $mpio.SerialNumber +"<br>")
+	}
+}
+
+$fichero.writeline("__Disks:__")
+$ficherohtml.writeline("<br><b>Disks:</b><br>")
+$hwdiscos = $devices | ? {$_.DeviceClass -eq "DISKDRIVE"} | sort Location
+foreach ($hwdisco in $hwdiscos)
+{
+	$fichero.writeline($hwdisco.FriendlyName+" | "+$hwdisco.Manufacturer+" | Driver: "+$hwdisco.DriverVersion+" | DriverDate: "+$hwdisco.DriverDate+" | "+$hwdisco.PDO+" | "+$hwdisco.Location)
+	$ficherohtml.writeline($hwdisco.FriendlyName+" | "+$hwdisco.Manufacturer+" | Driver: "+$hwdisco.DriverVersion+" | DriverDate: "+$hwdisco.DriverDate+" | "+$hwdisco.PDO+" | "+$hwdisco.Location+"<br>")
+}
+
+if(test-path $env:programfiles"\hp\hponcfg\hponcfg.exe")
+{
+	$indexRemote_Console = 1
+	$fichero.writeline("!!#Remote Console:")
+	$ficherohtml.writeline("<A name=Remote Console></A>")
+	$ficherohtml.writeline("<H4>Remote Console</H4>")
+	$rcilo = & $env:programfiles"\hp\hponcfg\hponcfg.exe" /get_hostinfo
+	& $env:programfiles"\hp\hponcfg\hponcfg.exe" /w rc.txt
+	if(test-path rc.txt)
+	{
+		$rcilo += get-content rc.txt
+	}
+		
+	$fichero.writeline("HP ILO Config:")
+	$ficherohtml.writeline("HP ILO Config:<br>")
+	foreach ($line in $rcilo)
+	{
+		if($line -like "*<IP_ADDRESS VALUE*")
+		{
+			$rcip = ($line -split '"')[1]
+		}
+		if($line -like "*<*" -and $line -like "*>*")
+		{
+			$line = ($line -split "<" -split ">")[1]
+		}
+		$fichero.writeline($line)
+		$ficherohtml.writeline($line+"<br>")
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Performance")
+$ficherohtml.writeline("<A name=Performance></A>")
+$ficherohtml.writeline("<H3>Performance</H3>")
+
+$fichero.writeline("Date | CPUuse | RAMfree/total | Diskuse | DiskLatencyms | Netuse | CPUstolentime(only vmware)")
+$ficherohtml.writeline("Date | CPUuse | RAMfree/total | Diskuse | DiskLatencyms | Netuse | CPUstolentime(only vmware)<br>")
+for($i=1; $i -le $numoutperformance; $i++)
+{
+	start-sleep 5
+	$fecha = (get-date).tostring()
+	$perfcpu = [int](Get-WmiObject win32_processor | Measure-Object -property LoadPercentage -Average).average
+	$perframlibre = [int]((Get-WmiObject win32_OperatingSystem).FreePhysicalMemory / 1024)
+
+	#perfwritelatency perfreadlatency and perfiops
+	if((Get-Counter -ListSet * | ? {$_.countersetname -eq "PhysicalDisk"}).countersetname -eq "PhysicalDisk")
+	{
+		$perfreadlatency = [int]((((Get-Counter "\PhysicalDisk(*)\Avg. Disk sec/Read").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfwritelatency = [int]((((Get-Counter "\PhysicalDisk(*)\Avg. Disk sec/Write").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfiops = [int](((Get-Counter "\PhysicalDisk(*)\Disk Transfers/sec").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue)
+	}
+	elseif((Get-Counter -ListSet * | ? {$_.countersetname -eq "DiscoFísico"}).countersetname -eq "DiscoFísico")
+	{
+		$perfreadlatency = [int]((((Get-Counter "\DiscoFísico(*)\Media en segundos/lectura").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfwritelatency = [int]((((Get-Counter "\DiscoFísico(*)\Media en segundos/escritura").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfiops = [int](((Get-Counter "\DiscoFísico(*)\Transferencias de s.").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue)
+	}
+	elseif((Get-Counter -ListSet * | ? {$_.countersetname -eq "Disco Físico"}).countersetname -eq "Disco Físico")
+	{
+		$perfreadlatency = [int]((((Get-Counter "\Disco Físico(*)\Promedio de segundos de disco/lectura").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfwritelatency = [int]((((Get-Counter "\Disco Físico(*)\Promedio de segundos de disco/escritura").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		$perfiops = [int](((Get-Counter "\Disco Físico(*)\Transferencias de disco/s").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue)
+	}
+
+	#get max latency read or write
+	if($perfreadlatency -lt $perfwritelatency)
+	{
+		$perflatency = $perfwritelatency
+	}
+	else
+	{
+		$perflatency = $perfreadlatency
+	}
+	#vmware cpu stolen time
+	if((Get-WmiObject -list | ? {$_.name -eq "Win32_PerfRawData_vmGuestLib_VCPU"}).name -eq "Win32_PerfRawData_vmGuestLib_VCPU")
+	{
+		if((Get-Counter -list * | ? {$_.countersetname -like "VM Processor"}).countersetname -eq "VM Processor")
+		{
+			$perfcpustolentime = [int]((((Get-Counter "\VM Processor(*)\CPU stolen time").countersamples | ? {$_.Instancename -eq "_total"}).cookedvalue) * 1000)
+		}
+	}
+	#usage of disk
+	if((Get-WmiObject -list | ? {$_.name -eq "Win32_PerfFormattedData_PerfDisk_PhysicalDisk"}).name -eq "Win32_PerfFormattedData_PerfDisk_PhysicalDisk")
+	{
+		$perfdisco = [int]((get-WmiObject Win32_PerfFormattedData_PerfDisk_PhysicalDisk | measure-object -property DiskBytespersec -sum).sum / 1024 / 1024)
+	}else{
+		$perfdisco = "N/A"
+	}
+	#usage of net
+	if((Get-WmiObject -list | ? {$_.name -eq "Win32_PerfFormattedData_Tcpip_NetworkInterface"}).name -eq "Win32_PerfFormattedData_Tcpip_NetworkInterface")
+	{
+		$perfred = [int]((get-WmiObject Win32_PerfFormattedData_Tcpip_NetworkInterface | measure-object -property BytesTotalPersec -sum).sum / 1024 / 1024)
+	}else{
+		$perfred = "N/A"
+	}
+	#thresholds for review section
+	if($perfcpu -gt 75 -or $perframlibre -lt 1000 -or $perfdisco -gt 50 -or $perflatency -gt 25 -or $perfred -gt 50 -or $perfiops -gt 500)
+	{
+		$revision += "performance (cpu > 75% or ramfree < 1000MB or usedisk > 50MB/s or iops > 500 or disklatencyms > 25 or usenet > 50MB/s) | " + $fecha+" CPU%use: "+$perfcpu+" RAMtotal: "+$ram+"MB RAMfree: "+$perframlibre+"MB DiskMBpersec: "+$perfdisco+" DiskIOps: " +("{0:D4}" -f $perfiops)+ " DiskLatencyms: "+$perflatency+" MB NetUse: "+$perfred+"MB"
+	}
+	$fichero.writeline($fecha+" | CPUuse: "+("{0:D3}" -f $perfcpu)+"% | RAMfree/total: "+("{0:D5}" -f $perframlibre)+"/"+("{0:D5}" -f $ram)+"MB | Diskuse: "+("{0:D4}" -f $perfdisco)+"MB | DiskIOps: " +("{0:D4}" -f $perfiops)+ " DiskLatencyms: "+("{0:D4}" -f $perflatency)+" | Netuse: "+("{0:D4}" -f $perfred)+"MB | CPUstolentime: "+$perfcpustolentime)
+	$ficherohtml.writeline($fecha+" | CPUuse: "+("{0:D3}" -f $perfcpu)+"% | RAMfree/total: "+("{0:D5}" -f $perframlibre)+"/"+("{0:D5}" -f $ram)+"MB | Diskuse: "+("{0:D4}" -f $perfdisco)+"MB | DiskIOps: " +("{0:D4}" -f $perfiops)+ " DiskLatencyms: "+("{0:D4}" -f $perflatency)+" | Netuse: "+("{0:D4}" -f $perfred)+"MB | CPUstolentime: "+$perfcpustolentime+"<br>")
+	$fichero.close()
+	$ficherohtml.close()
+	$fichero = New-Object System.IO.StreamWriter $pwd\$name".txt",$true
+	$ficherohtml = New-Object System.IO.StreamWriter $pwd\$name".html",$true
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#ENV")
+$ficherohtml.writeline("<A name=ENV></A>")
+$ficherohtml.writeline("<H3>ENV</H3>")
+$env = get-childitem env: | select Name,Value
+
+foreach ($key in $env)
+{
+	$key.psobject.properties | foreach{$fichero.write($_.Name +": "+ $_.Value+" |");$ficherohtml.write($_.Name +": "+ $_.Value+" |")}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Eventlog")
+$ficherohtml.writeline("<A name=Eventlog></A>")
+$ficherohtml.writeline("<H3>Eventlog</H3>")
+$eventlogs = Get-EventLog -list
+
+$fichero.writeline("Eventlog Info, it is recommendable to have at least 7 days of history")
+$ficherohtml.writeline("Eventlog Info, it is recommendable to have at least 7 days of history<br>")
+$fichero.writeline("Log | MaxKB | History | Entries | Action | Retain")
+$ficherohtml.writeline("Log | MaxKB | History | Entries | Action | Retain<br>")
+if($so -notlike "*2003*")
+{
+	foreach($eventlog in $eventlogs)
+	{
+		$eventlog_oldtime = "N/A"
+		$eventlog_entries = $eventlog.entries.count
+		if($eventlog_entries -gt 0)
+		{
+			$eventlog_oldtime = get-date ((Get-WinEvent -logname $eventlog.log -Oldest -maxevents 1).TimeCreated) -format yyyyMMdd_HH:mm
+		}
+		$fichero.writeline($eventlog.log + " | " + $eventlog.MaximumKilobytes + " | " + $eventlog_oldtime + " | " + $eventlog_entries + " | " + $eventlog.OverflowAction + " | " + $eventlog.MinimumRetentionDays)
+		$ficherohtml.writeline($eventlog.log + " | " + $eventlog.MaximumKilobytes + " | " + $eventlog_oldtime + " | " + $eventlog_entries + " | " + $eventlog.OverflowAction + " | " + $eventlog.MinimumRetentionDays+"<br>")
+	}
+}else{
+	$fichero.writeline("w2003, cant use get-winevent command to get info of eventlogs")
+	$ficherohtml.writeline("w2003, cant use get-winevent command to get info of eventlogs<br>")
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Startup Programs")
+$ficherohtml.writeline("<A name=Startup Programs></A>")
+$ficherohtml.writeline("<H3>Startup Programs</H3>")
+$startup_programs = Get-WmiObject -class win32_startupcommand | ? {$_.command -notlike "*desktop.ini*" -and $_.command -notlike "*ctfmon.exe*"} | sort Location,Caption
+
+$fichero.writeline("Caption | User | Command | Location")
+$ficherohtml.writeline("Caption | User | Command | Location<br>")
+foreach ($startup_program in $startup_programs)
+{
+	$fichero.writeline($startup_program.caption + " | " + $startup_program.user + " | " + $startup_program.command + " | " + $startup_program.location)
+	$ficherohtml.writeline($startup_program.caption + " | " + $startup_program.user + " | " + $startup_program.command + " | " + $startup_program.location +"<br>")
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Net")
+$ficherohtml.writeline("<A name=Net></A>")
+$ficherohtml.writeline("<H3>Net</H3>")
+
+$fichero.writeline("!!#ipconfig")
+$ficherohtml.writeline("<A name=ipconfig></A>")
+$ficherohtml.writeline("<H4>ipconfig</H4>")
+$fichero.writeline("ipconfig /all :")
+$ficherohtml.writeline("ipconfig /all :<br>")
+$ipconfig = ipconfig /all
+foreach ($line in $ipconfig)
+{
+	$fichero.writeline($line)	
+	$ficherohtml.writeline($line+"<br>")
+}
+
+$powershellcmdletnicteaming = @()
+$powershellcmdletnicteaming = Get-Command *get-netlbfoteam*
+if($powershellcmdletnicteaming.count -gt 0)
+{
+	$nicteaming = @()
+	$nicteaming = Get-NetLbfoTeam
+	if($nicteaming -ne $null)
+	{
+		$indexnicteaming = 1
+		$functions = $functions+"NicTeaming "
+		$fichero.writeline("!!#nicteaming")
+		$ficherohtml.writeline("<A name=nicteaming></A>")
+		$ficherohtml.writeline("<H4>nicteaming</H4>")
+		$fichero.writeline("config nic teaming :")
+		$ficherohtml.writeline("config nic teaming :<br>")
+		$nicteamingconfig = @()
+		$nicteamingconfig += Get-NetLbfoTeam | Out-string -Stream
+		$nicteamingconfig += Get-NetLbfoTeamMember | Out-string -Stream
+		$nicteamingconfig += Get-NetLbfoTeamNic | Out-string -Stream
+		
+		foreach ($line in $nicteamingconfig)
+		{
+			if($line -ne $null -and $line -ne "")
+			{
+				$fichero.writeline($line)
+				$ficherohtml.writeline($line+"<br>")
+			}
+		}
+	}
+}
+
+if($so -notlike "*2003*")
+{
+	$indexmtu = 1
+	$fichero.writeline("!!#MTU")
+	$ficherohtml.writeline("<A name=MTU></A>")
+	$ficherohtml.writeline("<H4>MTU</H4>")
+	$mtu = netsh interface ipv4 show interfaces
+
+	foreach ($line in $mtu)
+	{	
+		$fichero.writeline($line)	
+		$ficherohtml.writeline($line+"<br>")
+	}
+}
+
+$fichero.writeline("!!#routes")
+$ficherohtml.writeline("<A name=routes></A>")
+$ficherohtml.writeline("<H4>routes</H4>")
+$fichero.writeline("persistent routes:")
+$ficherohtml.writeline("persistent routes:<br>")
+$fichero.writeline("Net | Mask | GW")
+$ficherohtml.writeline("Net | Mask | GW<br>")
+foreach ($ruta in (Get-WmiObject -Class Win32_IP4PersistedRouteTable))
+{
+	$fichero.writeline($ruta.destination+" | "+$ruta.mask+" | "+$ruta.nexthop)
+	$ficherohtml.writeline($ruta.destination+" | "+$ruta.mask+" | "+$ruta.nexthop+"<br>")
+}
+
+$fichero.writeline("!!#hosts file")
+$ficherohtml.writeline("<A name=hosts file></A>")
+$ficherohtml.writeline("<H4>hosts file</H4>")
+
+$hostsfile = get-content c:\windows\system32\drivers\etc\hosts
+$fichero.writeline("^")
+foreach ($linea in $hostsfile)
+{
+	if(!$linea.startswith("#") -and $linea -ne "")
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+}
+$fichero.writeline("^")
+
+$fichero.writeline("!!#ntpclient")
+$ficherohtml.writeline("<A name=ntpclient></A>")
+$ficherohtml.writeline("<H4>ntpclient</H4>")
+$ntpserver=(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\w32time\Parameters').NtpServer
+$ntptype=(Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\w32time\Parameters').type
+$fichero.writeline("NTP Client Config: type "+$ntptype+" | NtpServer "+$ntpserver)
+$ficherohtml.writeline("NTP Client Config: type "+$ntptype+" | NtpServer "+$ntpserver+"<br>")
+
+$fichero.writeline("!!#other")
+$ficherohtml.writeline("<A name=other></A>")
+$ficherohtml.writeline("<H4>other</H4>")
+$fichero.writeline("Firewall Windows: ")
+$ficherohtml.writeline("Firewall Windows: <br>")
+if($so -like "*2003*")
+{
+	$fw2003 = netsh.exe firewall show state
+	foreach ($linea in $fw2003)
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+}else{
+	if((get-service MpsSvc).status -ne "Running")
+	{
+		$fichero.writeline("FW service not running")
+		$ficherohtml.writeline("FW service not running<br>")
+	}else{
+		$fwdomain = netsh.exe advfirewall show domainprofile | select-string state,estado
+		$fwprivate = netsh.exe advfirewall show privateprofile | select-string state,estado
+		$fwpublic = netsh.exe advfirewall show publicprofile | select-string state,estado
+		$fichero.writeline("FW Perfil Domain: "+$fwdomain)
+		$fichero.writeline("FW Private Domain: "+$fwprivate)
+		$fichero.writeline("FW Public Domain: "+$fwpublic)
+		$ficherohtml.writeline("FW Perfil Domain: "+$fwdomain+"<br>")
+		$ficherohtml.writeline("FW Private Domain: "+$fwprivate+"<br>")
+		$ficherohtml.writeline("FW Public Domain: "+$fwpublic+"<br>")
+	}
+}
+
+$fichero.writeline("Config RDP")
+$ficherohtml.writeline("Config RDP<br>")
+if ((Get-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server').fDenyTSConnections -eq 1)
+{
+	$fichero.writeline("RDP not enabled")
+	$ficherohtml.writeline("RDP not enabled<br>")
+}elseif((Get-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP*').UserAuthentication -eq 1)
+{
+	$fichero.writeline("RDP enabled only client with NLA")
+	$ficherohtml.writeline("RDP enabled only client with NLA<br>")
+}else{
+	$fichero.writeline("RDP enabled with any client")
+	$ficherohtml.writeline("RDP enabled with any client<br>")
+}
+
+if($so -notlike "*2003*")
+{
+	$rdpnicinterface = (Get-WmiObject Win32_TSNetworkadaptersetting -Namespace "root\cimv2\TerminalServices").NetworkAdapterName
+}else{
+	$rdpnicinterface = (gwmi Win32_TSNetworkAdapterSetting).networkadaptername
+}
+
+$fichero.writeline("RDP enabled in nic interface/s:"+$rdpnicinterface)
+$ficherohtml.writeline("RDP enabled in nic interface/s:"+$rdpnicinterface+"<br>")
+
+$reg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey('CurrentUser',$name)
+$proxy = $reg.OpenSubkey("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")
+$proxyenabled = $proxy.GetValue('ProxyEnable')
+$proxyurl = $proxy.GetValue('ProxyServer')
+if($proxyenabled -eq 1)
+{
+	$fichero.writeline("With Proxy: "+$proxyurl)
+	$ficherohtml.writeline("With Proxy: "+$proxyurl+"<br>")
+}else{
+	$fichero.writeline("No Proxy")
+	$ficherohtml.writeline("No Proxy<br>")
+}
+
+$fichero.writeline("!!#netstat")
+$ficherohtml.writeline("<A name=netstat></A>")
+$ficherohtml.writeline("<H4>netstat</H4>")
+$fichero.writeline("netstat -es:")
+$ficherohtml.writeline("netstat -es:<br>")
+$netstat_es = c:\windows\system32\netstat.exe -es
+foreach ($line in $netstat_es)
+{
+	$fichero.writeline($line)	
+	$ficherohtml.writeline($line+"<br>")
+}
+$fichero.writeline("netstat -abno:")
+$ficherohtml.writeline("netstat -abno:<br>")
+$netstat_abno = c:\windows\system32\netstat.exe -abno
+foreach ($line in $netstat_abno)
+{
+	$fichero.writeline($line)	
+	$ficherohtml.writeline($line+"<br>")
+}
+
+
+if(test-path c:\windows\system32\nlb.exe)
+{
+	$nlbdisplay = c:\windows\system32\nlb.exe display
+	foreach ($linea in $nlbdisplay)
+	{
+		if($linea -like "*ClusterName*")
+		{
+			$nlb_on = 1
+		}
+	}
+	if($nlb_on -eq 1)
+	{
+		$indexnlb = 1
+		$fichero.writeline("--------------------")
+		$fichero.writeline("!#NLB")
+		$ficherohtml.writeline("<A name=NLB></A>")
+		$ficherohtml.writeline("<H3>NLB</H3>")
+		foreach ($linea in $nlbdisplay)
+		{
+			$fichero.writeline($linea)
+			$ficherohtml.writeline($linea+"<br>")
+		}
+		$functions = $functions+"NLB "
+	}
+}
+
+$fichero.writeline("")
+$fichero.writeline("Script Doc Windows Server, Jorge Navarro Manzano http://linkedin.com/in/jorgenavarromanzano")
+$fichero.writeline("http://github.com/jorgenavarromanzano")
+$ficherohtml.writeline("Script Doc Windows Server, Jorge Navarro Manzano<br>https://linkedin.com/in/jorgenavarromanzano<br>http://github.com/jorgenavarromanzano<br>")
+
+if((get-command | ? {$_.name -eq "Get-Module"}).name -eq "Get-Module" -and (Get-WmiObject -Class Win32_service | ? {$_.name -eq "clussvc"}).name -eq "ClusSvc")
+{
+	if((Get-Module -ListAvailable | ? {$_.Name -eq "failoverclusters"}).name -eq "failoverclusters")
+	{
+		Import-Module failoverclusters
+		$indexcluster = 1
+		$fichero.writeline("--------------------")
+		$fichero.writeline("!#Cluster")
+		$ficherohtml.writeline("<A name=Cluster></A>")
+		$ficherohtml.writeline("<H3>Cluster</H3>")
+		
+		$functions = $functions+"Cluster "
+		
+		$cluster = get-cluster
+		$clusterquorum = Get-ClusterQuorum
+		$fichero.writeline("Cluster: "+$cluster.Name+" | Domain: "+$cluster.Domain+" | Quorum: "+$clusterquorum.QuorumType)
+		$ficherohtml.writeline("Cluster: "+$cluster.Name+" | Domain: "+$cluster.Domain+" | Quorum: "+$clusterquorum.QuorumType+"<br>")
+		$clusternode = Get-ClusterNode
+		foreach ($node in $clusternode)
+		{
+			$fichero.writeline("Server: "+$node.Name+" | State: "+$node.State)
+			$ficherohtml.writeline("Server: "+$node.Name+" | State: "+$node.State+"<br>")
+		}
+		$clustergroup = Get-ClusterGroup
+		foreach ($group in $ClusterGroup)
+		{
+			$fichero.writeline("Group: "+$group.Name+" | State: "+$group.State+" | OwnerNode: "+$group.OwnerNode+" | DefaultOwner: "+$group.DefaultOwner+" | AutoFailbackType: "+$group.AutoFailbackType)
+			$ficherohtml.writeline("Group: "+$group.Name+" | State: "+$group.State+" | OwnerNode: "+$group.OwnerNode+" | DefaultOwner: "+$group.DefaultOwner+" | AutoFailbackType: "+$group.AutoFailbackType+"<br>")
+		}
+		$clusternetwork = Get-ClusterNetwork
+		foreach ($network in $clusternetwork)
+		{
+			$fichero.writeline("Network: "+$network.Name+" | State: "+$network.State+" | Description: "+$network.Description+" | Address: "+$network.address+" | Mask: "+$network.AddressMask)
+			$ficherohtml.writeline("Network: "+$network.Name+" | State: "+$network.State+" | Description: "+$network.Description+" | Address: "+$network.address+" | Mask: "+$network.AddressMask+"<br>")
+		}
+		$clusterNetworkInterface = Get-ClusterNetworkInterface | Sort Node
+		foreach ($NetworkInterface in $clusterNetworkInterface)
+		{
+			$fichero.writeline("NIC: "+$NetworkInterface.Name+" | Name: "+$NetworkInterface.Name+" | State: "+$Networkinterface.State+" | Address: "+$Networkinterface.Address)
+			$ficherohtml.writeline("NIC: "+$NetworkInterface.Name+" | Name: "+$NetworkInterface.Name+" | State: "+$Networkinterface.State+" | Address: "+$Networkinterface.Address+"<br>")
+		}
+		$ClusterResource = Get-ClusterResource
+		foreach ($resource in $ClusterResource)
+		{
+			$dependencia = $resource | get-clusterresourcedependency
+			if($dependencia.DependencyExpression -ne "")
+			{
+				$fichero.writeline("Resource: "+$resource.Name+" | State: "+$resource.State+" | Type: "+$resource.ResourceType+" | Group: "+$resource.OwnerGroup+" | Owner: "+$resource.OwnerNode+" | Dependency: "+$dependencia.DependencyExpression)
+				$ficherohtml.writeline("Resource: "+$resource.Name+" | State: "+$resource.State+" | Type: "+$resource.ResourceType+" | Group: "+$resource.OwnerGroup+" | Owner: "+$resource.OwnerNode+" | Dependency: "+$dependencia.DependencyExpression+"<br>")
+			}else{
+				$fichero.writeline("Resource: "+$resource.Name+" | State: "+$resource.State+" | Type: "+$resource.ResourceType+" | Group: "+$resource.OwnerGroup+" | Owner: "+$resource.OwnerNode)
+				$ficherohtml.writeline("Resource: "+$resource.Name+" | State: "+$resource.State+" | Type: "+$resource.ResourceType+" | Group: "+$resource.OwnerGroup+" | Owner: "+$resource.OwnerNode+"<br>")
+			}
+		}
+	}
+}
+
+if(($so -like "*2003*") -and (Get-WmiObject -Class Win32_service | ? {$_.name -eq "clussvc" -and $_.state -eq "Running"}).name -eq "ClusSvc")
+{
+	$indexcluster = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#Cluster")
+	$ficherohtml.writeline("<A name=Cluster></A>")
+	$ficherohtml.writeline("<H3>Cluster</H3>")
+	
+	$cw2003name = (get-wmiobject -class "MSCluster_Cluster" -namespace "root\mscluster").name
+	$fichero.writeline("Windows 2003 Cluster Name: "+$cw2003name)
+	$ficherohtml.writeline("Windows 2003 Cluster Name: "+$cw2003name+"<br>")
+	
+	$cw2003nodes = get-wmiobject -class MSCluster_Node -namespace "root\mscluster"
+	foreach ($cw2003node in $cw2003nodes)
+	{
+		$fichero.writeline("Node: "+$cw2003node.Name)
+		$ficherohtml.writeline("Node: "+$cw2003node.Name+"<br>")
+	}
+	
+	$functions = $functions+"ClusterW2003 "
+}
+
+if(($so -like "*2008*") -and (Get-WmiObject -Class Win32_service | ? {$_.name -eq "clussvc" -and $_.state -eq "Running"}).name -eq "ClusSvc")
+{
+	if(!(Get-Module -ListAvailable | ? {$_.Name -eq "failoverclusters"}).name -eq "failoverclusters")
+	{
+		$indexcluster = 1
+		$fichero.writeline("--------------------")
+		$fichero.writeline("!#Cluster")
+		$ficherohtml.writeline("<A name=Cluster></A>")
+		$ficherohtml.writeline("<H3>Cluster</H3>")
+		
+		$cw2008name = (get-wmiobject -class "MSCluster_Cluster" -namespace "root\mscluster").name
+		$fichero.writeline("Windows 2008 Cluster Name: "+$cw2008name)
+		$ficherohtml.writeline("Windows 2008 Cluster Name: "+$cw2008name+"<br>")
+		
+		$cw2008nodes = get-wmiobject -class MSCluster_Node -namespace "root\mscluster"
+		foreach ($cw2008node in $cw2008nodes)
+		{
+			$fichero.writeline("Node: "+$cw2008node.Name)
+			$ficherohtml.writeline("Node: "+$cw2008node.Name+"<br>")
+		}
+		$cw2008groups = get-wmiobject -namespace "root\mscluster" -class MSCluster_resourcegroup
+		$cw2008groupstonodes = get-wmiobject -namespace "root\mscluster" -class MSCluster_NodeToActiveGroup
+		$fichero.writeline("Groups: Name | State | Node")
+		$ficherohtml.writeline("Groups: Name | State | Node<br>")
+		foreach ($cw2008group in $cw2008groups)
+		{
+			foreach ($cw2008groupstonode in $cw2008groupstonodes)
+			{
+				if(($cw2008groupstonode.PartComponent -split """")[1] -eq $cw2008group.Name)
+				{
+					$cw2008grouptonode = ($cw2008groupstonode.GroupComponent -split """")[1]
+				}
+			}
+			$fichero.writeline($cw2008group.Name + " | " + $cw2008group.internalstate + " | " + $cw2008grouptonode)
+			$ficherohtml.writeline($cw2008group.Name + " | " + $cw2008group.internalstate + " | " + $cw2008grouptonode +"<br>")
+		}
+		
+		$cw2008disks = get-wmiobject -namespace "root\mscluster" -class MSCluster_diskpartition
+		$fichero.writeline("------------------")
+		$ficherohtml.writeline("------------------<br>")
+		$fichero.writeline("Disks: Path | VolumeLabel | SerialNumber")
+		$ficherohtml.writeline("Disks: Path | VolumeLabel | SerialNumber<br>")
+		foreach ($cw2008disk in $cw2008disks)
+		{
+			$fichero.writeline($cw2008disk.Path +" | "+ $cw2008disk.VolumeLabel + " | " + $cw2008disk.SerialNumber)
+			$ficherohtml.writeline($cw2008disk.Path +" | "+ $cw2008disk.VolumeLabel + " | " + $cw2008disk.SerialNumber+"<br>")
+		}
+				
+		$cw2008resources = get-wmiobject -namespace "root\mscluster" -class MSCluster_Resource
+		$fichero.writeline("------------------")
+		$ficherohtml.writeline("------------------<br>")
+		$fichero.writeline("Resources: Name | Type")
+		$ficherohtml.writeline("Resources: Name | Type<br>")
+		foreach ($cw2008resource in $cw2008resources)
+		{
+			$fichero.writeline($cw2008resource.Name +" | "+ $cw2008resource.Type)
+			$ficherohtml.writeline($cw2008resource.Name +" | "+ $cw2008resource.Type+"<br>")
+		}
+		
+		$functions = $functions+"Cluster "
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Shares-Mapped Drives")
+$ficherohtml.writeline("<A name=Shares-Mapped Drives></A>")
+$ficherohtml.writeline("<H3>Shares-Mapped Drives</H3>")
+
+$fichero.writeline("Shares:")
+$ficherohtml.writeline("Shares:<br>")
+$fichero.writeline("Name | Path | Description")
+$ficherohtml.writeline("Name | Path | Description<br>")
+$shares = @()
+$shares = get-WmiObject -class Win32_Share | Sort Name | select Name,Path,Description,Type | ? {$_.Type -eq 0}
+foreach ($share in $shares)
+{
+	$fichero.writeline($share.Name+" | "+$share.Path+" | "+$share.Description)
+	$ficherohtml.writeline($share.Name+" | "+$share.Path+" | "+$share.Description+"<br>")
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+
+$sharessessions = @()
+$sharessessions = net session | select-string "\\"
+
+$fichero.writeline("Sessions:"+$sharessessions.count)
+$ficherohtml.writeline("Sessions:"+$sharessessions.count+"<br>")
+$fichero.writeline("Node | User | Client | Files | Inactivity")
+$ficherohtml.writeline("Node | User | Client | Files | Inactivity<br>")
+foreach ($line in $sharessessions)
+{
+	$fichero.writeline($line)
+	$ficherohtml.writeline(""+$line+"<br>")
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("Mapped Drives:")
+$ficherohtml.writeline("Mapped Drives:<br>")
+
+$mappeds = @()
+$mappeds = Get-WmiObject Win32_MappedLogicalDisk
+if($mappeds -ne $null)
+{
+	$nmappeds = 0
+	foreach ($mapped in $mappeds)
+	{
+		$nmappeds = $nmappeds + 1
+		$fichero.writeline($mapped.Name + " | " + $mapped.ProviderName)
+		$ficherohtml.writeline($mapped.Name + " | " + $mapped.ProviderName+"<br>")
+	}
+	$functions = $functions+$nmappeds+"MappedDrives "
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#ODBC")
+$ficherohtml.writeline("<A name=ODBC></A>")
+$ficherohtml.writeline("<H3>ODBC</H3>")
+
+$odbcs = "SOFTWARE\ODBC\ODBC.INI", "SOFTWARE\Wow6432Node\ODBC\ODBC.INI"
+
+foreach ($odbc in $odbcs)
+{
+	$type = [Microsoft.Win32.RegistryHive]::LocalMachine
+    $srcReg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey( $type,$name)
+    $OdbcKey = $srcReg.OpenSubKey( $odbc )
+	if($OdbcKey -ne $null)
+	{
+		foreach ($oDrvr in $OdbcKey.GetSubKeyNames())
+		{  
+			$sKey = $odbc + "\" + $oDrvr
+			$oDrvrKey = $srcReg.OpenSubKey( $sKey )
+			foreach ($oDrvrVal in $oDrvrKey.GetValueNames())
+			{
+				$fichero.writeline($oDrvrVal + " | " + $oDrvrKey.GetValue($oDrvrVal) + " | " + $sKey)
+				$ficherohtml.writeline($oDrvrVal + " | " + $oDrvrKey.GetValue($oDrvrVal) + " | " + $sKey+"<br>")
+			}
+			$fichero.writeline("----------------")
+			$ficherohtml.writeline("----------------<br>")
+		}
+	}
+}
+
+if((get-command | ? {$_.name -eq "Get-Module"}).name -eq "Get-Module")
+{
+	if((Get-Module -ListAvailable | ? {$_.Name -eq "ServerManager"}).name -eq "ServerManager")
+	{
+		Import-Module ServerManager
+	}
+}
+
+if((get-command | ? {$_.name -eq "Get-WindowsFeature"}).name -eq "Get-WindowsFeature")
+{
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#Roles-Features")
+	$ficherohtml.writeline("<A name=Roles-Features></A>")
+	$ficherohtml.writeline("<H3>Roles-Features</H3>")
+	$features = get-windowsfeature | ? {$_.Installed -eq $true}
+	foreach ($feature in $features)
+	{
+		$fichero.writeline($feature.DisplayName+" | "+$feature.Name+" | "+$feature.FeatureType+" | Parent: "+$feature.Parent)
+		$ficherohtml.writeline($feature.DisplayName+" | "+$feature.Name+" | "+$feature.FeatureType+" | Parent: "+$feature.Parent+"<br>")
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Programs")
+$ficherohtml.writeline("<A name=Programs></A>")
+$ficherohtml.writeline("<H3>Programs</H3>")
+
+if($arq -like "*64*")
+{
+	$programas = @()
+	$programas += Get-ItemProperty HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.Displayname -ne $null -and $_.DisplayName -notlike "*update*" -and $_.DisplayName -notlike "*hotfix*" -and $_.DisplayName -notlike "*Actualiza*" -and $_.DisplayName -notlike "*Revisi*" -and $_.DisplayName -notlike "*(KB*"} | sort DisplayName | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, @{Name="arq";Expression={"x32"}}
+	$programas += Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.Displayname -ne $null -and $_.DisplayName -notlike "*update*" -and $_.DisplayName -notlike "*hotfix*" -and $_.DisplayName -notlike "*Actualiza*" -and $_.DisplayName -notlike "*Revisi*" -and $_.DisplayName -notlike "*(KB*"} | sort DisplayName | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, @{Name="arq";Expression={"x64"}}
+}else{
+	$programas += Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.Displayname -ne $null -and $_.DisplayName -notlike "*update*" -and $_.DisplayName -notlike "*hotfix*" -and $_.DisplayName -notlike "*Actualiza*" -and $_.DisplayName -notlike "*Revisi*" -and $_.DisplayName -notlike "*(KB*"} | sort DisplayName | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, @{Name="arq";Expression={"x32"}}
+}
+foreach ($programa in $programas)
+{
+	$fichero.writeline($programa.DisplayName+" | "+$programa.DisplayVersion+" | "+$programa.Publisher+" | InstallDate: "+$programa.InstallDate+" | "+$programa.arq)
+	$ficherohtml.writeline($programa.DisplayName+" | "+$programa.DisplayVersion+" | "+$programa.Publisher+" | InstallDate: "+$programa.InstallDate+" | "+$programa.arq+"<br>")
+	if($programa.displayname -like "*VMware Tools*")
+	{
+		$vmwaretoolsinstalled = 1
+		
+		$vmwaretddd = $programa.installdate.substring(6,2)
+		$vmwaretdmm = $programa.installdate.substring(4,2)
+		$vmwaretdyyyy = $programa.installdate.substring(0,4)
+		if((get-culture).name -like "*es*")
+		{
+			$vmwaretd = get-date($vmwaretddd+"/"+$vmwaretdmm+"/"+$vmwaretdyyyy)
+		}else{
+			$vmwaretd = get-date($vmwaretdmm+"/"+$vmwaretddd+"/"+$vmwaretdyyyy)
+		}
+		
+		if($vmwaretd -lt (get-date).addyears(-2) -and $vmwaretd -ne $null)
+		{
+			$vmwaretoolsold = 1
+		}
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Updates")
+$ficherohtml.writeline("<A name=Updates></A>")
+$ficherohtml.writeline("<H3>Updates</H3>")
+
+$updatelastdate=@{}
+$Session = New-Object -ComObject Microsoft.Update.Session
+$Searcher = $Session.CreateUpdateSearcher()
+$updatelastdate = $Searcher.QueryHistory(1,1) | select -ExpandProperty Date
+if($updatelastdate -ne $null)
+{
+	$fichero.writeline("Last Patch Upgrade: "+$updatelastdate)
+	$ficherohtml.writeline("Last Patch Upgrade: "+$updatelastdate+"<br>")
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("Config WindowsUpdate:")
+$ficherohtml.writeline("Config WindowsUpdate:<br>")
+
+if(test-path HKLM:\SOFTWARE\Policies\Microsoft\windows\windowsupdate)
+{
+	$ConfigKeys = "AUOptions","AutoInstallMinorUpdates","DetectionFrequency","DetectionFrequencyEnabled","NoAutoRebootWithLoggedOnUsers","NoAutoUpdate","RebootRelaunchTimeout","RebootRelaunchTimeoutEnabled","RebootWarningTimeout","RebootWarningTimeoutEnabled","RescheduleWaitTime","RescheduleWaitTimeEnabled","ScheduleInstallDay","ScheduleInstallTime","UseWUServer"		
+	$EnvKeys = "WUServer","WUStatusServer","ElevateNonAdmins","TargetGroupEnabled","TargetGroup","DisableWindowsUpdateAccess"
+	$ServerReg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey("LocalMachine",$name)
+
+	$WSUSEnv = $ServerReg.OpenSubKey('Software\Policies\Microsoft\Windows\WindowsUpdate')
+	$subkeys = @($WSUSEnv.GetValueNames())
+
+	$Data = @(Compare-Object -ReferenceObject $EnvKeys -DifferenceObject $subkeys -IncludeEqual -ExcludeDifferent | Select -ExpandProperty InputObject)
+	ForEach ($key in $Data)
+	{
+		$fichero.writeline($key+" | "+$WSUSEnv.GetValue($key))
+		$ficherohtml.writeline($key+" | "+$WSUSEnv.GetValue($key)+"<br>")
+	}
+	
+	if(test-path -path "HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate\AU")
+	{
+		$WSUSConfig = $ServerReg.OpenSubKey('Software\Policies\Microsoft\Windows\WindowsUpdate\AU')
+		$subkeys = @($WSUSConfig.GetValueNames())
+
+		$Data = @(Compare-Object -ReferenceObject $ConfigKeys -DifferenceObject $subkeys -IncludeEqual -ExcludeDifferent | Select -ExpandProperty InputObject)
+		ForEach ($key in $Data)
+		{
+			$fichero.writeline($key+" | "+$WSUSConfig.GetValue($key))
+			$ficherohtml.writeline($key+" | "+$WSUSConfig.GetValue($key)+"<br>")
+		}
+	}
+}else{
+	$fichero.writeline("Without Config WindowsUpdate")
+	$ficherohtml.writeline("Without Config WindowsUpdate<br>")
+}
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("Installed Patches:")
+$ficherohtml.writeline("Installed Patches:<br>")
+
+if((get-command | ? {$_.name -eq "Get-Hotfix"}).name -eq "Get-Hotfix")
+{
+	$updates = get-hotfix | sort HotFixID
+	foreach ($update in $updates)
+	{
+		$fichero.write($update.HotfixID + " | " + $update.Description + " | " + $update.InstalledBy + " | " + $update.PSBase.Properties["installedon"].value)
+		$ficherohtml.write($update.HotfixID + " | " + $update.Description + " | " + $update.InstalledBy + " | " + $update.PSBase.Properties["installedon"].value)
+		$fichero.writeline("")
+		$ficherohtml.writeline("<br>")
+	}
+}else{
+	$updates = Get-ItemProperty HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {($_.Displayname -ne $null) -and ($_.DisplayName -like "*update*" -or $_.DisplayName -like "*hotfix*" -or $_.DisplayName -like "*Actualiza*" -or $_.DisplayName -like "*Revisi*" -or $_.DisplayName -like "*(KB*")} | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate | sort InstallDate
+	foreach ($update in $updates)
+	{
+		$update.psobject.properties | foreach {$fichero.write($_.Name +": "+ $_.Value+" | ");$ficherohtml.write($_.Name +": "+ $_.Value+" | ")}
+		$fichero.writeline("")
+		$ficherohtml.writeline("<br>")
+	}
+	if($arq -like "*64*")
+	{
+		$updates = Get-ItemProperty HKLM:\SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {($_.Displayname -ne $null) -and ($_.DisplayName -like "*update*" -or $_.DisplayName -like "*hotfix*" -or $_.DisplayName -like "*actualiza*" -or $_.DisplayName -like "*Revisi*" -or $_.DisplayName -like "*(KB*")} | Select-Object DisplayName, DisplayVersion, Publisher, InstallDate | sort InstallDate
+		foreach ($update in $updates)
+		{
+			$update.psobject.properties | foreach {$fichero.write($_.Name +": "+ $_.Value+" | ");$ficherohtml.write($_.Name +": "+ $_.Value+" | ")}
+			$fichero.writeline("")
+			$ficherohtml.writeline("<br>")
+		}
+	}
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("Pending Patches: (from wsus approved patches or internet, using local config)")
+$ficherohtml.writeline("Pending Patches: (from wsus approved patches or internet, using local config)<br>")
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("Title | Type | IsDownloaded | LastDeploymentChangeTime | MaxDownloadSize | MsrcSeverity | RebootRequired")
+$ficherohtml.writeline("Title | Type | IsDownloaded | LastDeploymentChangeTime | MaxDownloadSize | MsrcSeverity | RebootRequired<br>")
+
+$updateobject = New-Object -ComObject "Microsoft.Update.Session"
+$searcher = $updateobject.CreateUpdateSearcher()
+$pending = $searcher.Search("IsInstalled=0")
+
+foreach($entry in $pending.Updates)
+{
+	foreach($category in $entry.Categories)
+	{
+		$fichero.writeline($entry.Title+" | "+$category.Name+" | "+$entry.LastDeploymentChangeTime+" | "+$entry.MaxDownloadSize+" | "+$entry.MsrcSeverity+" | "+$entry.RebootRequired)
+		$ficherohtml.writeline($entry.Title+" | "+$category.Name+" | "+$entry.LastDeploymentChangeTime+" | "+$entry.MaxDownloadSize+" | "+$entry.MsrcSeverity+" | "+$entry.RebootRequired+"<br>")
+	}
+}
+
+if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "W3SVC"}).name -eq "W3SVC" -or (Get-WmiObject -Class Win32_service | ? {$_.name -eq "MSFtpsvc"}).name -eq "MSFtpsvc")
+{
+	$indexiis = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#IIS-FTP-SMTP")
+	$ficherohtml.writeline("<A name=IIS-FTP-SMTP></A>")
+	$ficherohtml.writeline("<H3>IIS-FTP-SMTP</H3>")
+	
+	if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "W3SVC"}).name -eq "W3SVC")
+	{
+		$fichero.writeline("Performance _Total Sites IIS:")
+		$ficherohtml.writeline("Performance _Total Sites IIS:<br>")
+		
+		$iis_perf_maximum_connections = ((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).MaximumConnections
+		if( ((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).TotalBytesTransfered -eq $null)
+		{
+			$iis_perf_totalMBs_transferred = (((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).TotalBytesTransferred) / 1024 / 1024
+		}else{
+			$iis_perf_totalMBs_transferred = (((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).TotalBytesTransfered) / 1024 / 1024
+		}
+		$iis_perf_totalMBs_transferred = [int]$iis_perf_totalMBs_transferred
+		$fichero.writeline("Maximum connections _Total: "+$iis_perf_maximum_connections+" | TotalMBs Transferred: "+$iis_perf_totalMBs_transferred+" | Boot Time: "+$boottime)
+		$ficherohtml.writeline("Maximum connections _Total: "+$iis_perf_maximum_connections+" | TotalMBs Transferred: "+$iis_perf_totalMBs_transferred+" | Boot Time: "+$boottime+"<br>")
+		
+		$fichero.writeline("Date | Connections | TotalKB/s")
+		$ficherohtml.writeline("Date | Connections | TotalKB/s<br>")
+				
+		for($i=1; $i -le 5; $i++)
+		{
+			start-sleep 5
+			$fecha = (get-date).tostring()
+			$iis_perf_connections = ((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).CurrentConnections
+			$iis_perf_KBs_transferred = (((get-WmiObject Win32_PerfFormattedData_W3SVC_WebService) | ? {$_.Name -eq "_Total"}).BytesTotalpersec) / 1024
+			$iis_perf_KBs_transferred = [int]$iis_perf_KBs_transferred
+			
+			$fichero.writeline($fecha+" | "+$iis_perf_connections+" | "+$iis_perf_KBs_transferred)
+			$ficherohtml.writeline($fecha+" | "+$iis_perf_connections+" | "+$iis_perf_KBs_transferred+"<br>")
+		}
+		
+		$functions = $functions+"IIS "
+		$fichero.writeline("")
+		$ficherohtml.writeline("<br>")
+	}
+	
+	$iis = @()
+	$sitesFTP = @()
+	if(test-path C:\Windows\System32\inetsrv\appcmd.exe)
+	{
+		$iis += (C:\Windows\system32\inetsrv\appcmd.exe list site)
+		$iis += (C:\Windows\system32\inetsrv\appcmd.exe list apppool)
+		$iis += (C:\Windows\system32\inetsrv\appcmd.exe list vdir)
+		foreach ($linea in $iis)
+		{
+			$fichero.writeline($linea)
+			$ficherohtml.writeline($linea+"<br>")
+		}
+		if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "ftpsvc"}).name -eq "ftpsvc")
+		{
+			$sitesFTP += C:\Windows\system32\inetsrv\appcmd.exe list site | select-string ":ftp"
+		}
+	}elseif(test-path C:\WINDOWS\system32\iisweb.vbs)
+	{
+		$iis += (cscript c:\windows\system32\iisweb.vbs /query)
+		
+		if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "MSFtpsvc"}).name -eq "MSFtpsvc")
+		{
+			$iis += (cscript c:\windows\system32\iisftp.vbs /query)
+			$sitesFTP += cscript c:\windows\system32\iisftp.vbs /query | select-string " STARTED "," INICIADO "
+		}
+		foreach ($linea in $iis)
+		{
+			if($linea -notlike "*Windows Script*" -and $linea -notlike "*Copyright*" -and $linea -notlike "*Connecting to server*" -and $linea -notlike "*Conectar al servidor*")
+			{
+				$fichero.writeline($linea)
+				$ficherohtml.writeline($linea+"<br>")
+			}
+		}
+	}
+	if($sitesFTP.count -gt 0 -and (Get-WmiObject -Class Win32_service | ? {$_.name -eq "MSFtpsvc"}).name -eq "MSFtpsvc")
+	{
+		$functions = $functions+"FTP "
+	}
+	
+	if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "SMTPSVC"}).name -eq "SMTPSVC" -and (Get-WmiObject -Class Win32_service | ? {$_.name -eq "SMTPSVC"}).state -eq "Running")
+	{
+		$fichero.writeline("")
+		$ficherohtml.writeline("<br>")
+		$fichero.writeline("SMTP WMI INFO:")
+		$ficherohtml.writeline("SMTP WMI INFO:<br>")
+		$fichero.writeline("WMI | Name | Value")
+		$ficherohtml.writeline("WMI | Name | Value<br>")
+		$functions = $functions+"SMTP "
+		if((gwmi -namespace "root" -class "__Namespace" | select name | ? {$_.Name -eq "MicrosoftIISv2"}).name -eq "MicrosoftIISv2")
+		{
+			$smtp_wmis = Get-WmiObject -namespace "root\MicrosoftIISv2:IIsSmtpDomain" -list *smtp* | select name
+			foreach ($smtp_wmi in $smtp_wmis)
+			{
+				$smtp_infos = Get-WmiObject -namespace "root\MicrosoftIISv2:IIsSmtpDomain" $smtp_wmi.name
+				foreach ($smtp_info in $smtp_infos)
+				{
+					$smtp_info.psobject.properties | ? {$_.Name -notlike "*__*" -and $_.value -notlike "*System*" -and $_.value -notlike "*\\*" -and $_.value -ne $null} | foreach {$fichero.writeline($smtp_wmi.Name+" | "+$_.Name +" | "+ $_.Value);$ficherohtml.writeline($smtp_wmi.Name+" | "+$_.Name +" | "+ $_.Value+"<br>")}
+				}
+			}
+		}else{
+			$fichero.writeline("Install IIS6 WMI Compatibility")
+			$ficherohtml.writeline("Install IIS6 WMI Compatibility<br>")
+		}
+	}
+}
+
+$hypervservices = @()
+$hypervservices += (get-service -name "*vmms*" | ? {$_.Status -eq "Running"})
+if($hypervservices.count -gt 0 -and (get-service -name "*vmms*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"HyperV "
+}
+
+if(($features | ? {$_.Name -eq "Hyper-V"}).name -eq "Hyper-V" -and $ClusterResource -ne $null)
+{
+	$indexhyperv = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#HyperV")
+	$ficherohtml.writeline("<A name=HyperV></A>")
+	$ficherohtml.writeline("<H3>HyperV</H3>")
+	
+	$hyperv_vms = @()
+	$hyperv_vms = $ClusterResource | ? {$_.ResourceType -like "Virtual Machine"}
+	foreach ($hyperv_vm in $hyperv_vms)
+	{
+		$fichero.writeline("VM: "+$hyperv_vm.Name+" | Group Cluster: "+$hyperv_vm.OwnerGroup+" | State: "+$hyperv_vm.State)
+		$ficherohtml.writeline("VM: "+$hyperv_vm.Name+" | Group Cluster: "+$hyperv_vm.OwnerGroup+" | State: "+$hyperv_vm.State+"<br>")
+	}
+	
+	if($hyperv_vms.count -gt 0)
+	{
+		$functions = $functions+$hyperv_vms.count+" VMs "
+	}
+}
+
+if(($features | ? {$_.Name -eq "Remote-Desktop-Services"}).name -eq "Remote-Desktop-Services")
+{
+	$indexrds = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#RDS")
+	$ficherohtml.writeline("<A name=RDS></A>")
+	$ficherohtml.writeline("<H3>RDS</H3>")
+	
+	$functions = $functions+"RDS "
+	
+	Import-Module RemoteDesktopServices
+	$rds = (Get-ChildItem RDS:\ -recurse ) | ? {$_.Type -ne "Container"} |  select PSPath,Currentvalue
+	foreach ($line in $rds)
+	{
+		$rdspath = ($line.PSPath -split "RemoteDesktopServices::RDS:")
+		$rdsvalue = ($line.currentvalue)
+		$rdsline = Out-String -Inputobject $rdspath" | "$rdsvalue
+		if($rdspath -notlike "*IconContents*")
+		{
+			$fichero.writeline($rdsline)
+			$ficherohtml.writeline($rdsline+"<br>")
+		}
+	}
+}
+
+if(($features | ? {$_.Name -eq "Print-Services"}).name -eq "Print-Services")
+{
+	$indexprintserver = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#PrintServer")
+	$ficherohtml.writeline("<A name=PrintServer></A>")
+	$ficherohtml.writeline("<H3>PrintServer</H3>")
+	
+	$functions = $functions+"PrintServer "
+	
+	if($indexcluster = 1)
+	{
+		$clusterspoolers = @()
+		$clusterresources = Get-ChildItem HKLM:\Cluster\Resources
+		foreach($clusterresource in $clusterresources)
+		{
+			$regvalues = Get-ItemProperty $clusterresource.pspath
+			foreach($regvalue in $regvalues)
+			{
+				if ($regvalue.Type -ne $Null -and $regvalue.Type.tolower() -eq "print spooler")
+				{
+                  [string]$regath = $clusterresource.pspath + "\Parameters\Printers"
+                  $clusterspoolers += $path
+				}
+			}
+			foreach($clusterspooler in $clusterspoolers)
+			{
+				$clusterprinters = Get-ChildItem $clusterspooler
+				foreach ($clusterprinter in $clusterprinters)
+				{
+					$regvalues = Get-ItemProperty $clusterprinter.pspath
+					$regvalues.psobject.properties | ? {$_.Name -notlike "*__*" -and $_.value -notlike "*System*" -and $_.value -notlike "*\\*" -and $_.value -notlike "*Microsoft.Powershell*" -and $_.value -notlike "*DevMode*"} | foreach {$fichero.writeline($_.Name +" | "+ $_.Value);$ficherohtml.writeline($_.Name +" | "+ $_.Value+"<br>")}
+				}
+			}
+		}
+	}
+}
+
+if((gwmi -list | ? {$_.Name -eq "Win32_TerminalServiceSetting"}).name -eq "Win32_TerminalServiceSetting")
+{
+	if((gwmi Win32_TerminalServiceSetting).licensingtype -eq 3 -or (gwmi Win32_TerminalServiceSetting).licensingtype -eq 4)
+	{
+		$indexterminal_server = 1
+		$fichero.writeline("--------------------")
+		$fichero.writeline("!#Terminal Server")
+		$ficherohtml.writeline("<A name=Terminal Server></A>")
+		$ficherohtml.writeline("<H3>Terminal Server</H3>")
+
+		$functions = $functions+"TerminalServer "
+		
+		$tsclasses = Get-WmiObject -List | ? {$_.Name -like "*Win32_TS*" -and $_.Name -notlike "*error*" -and $_.Name -notlike "*SessionDirectory*"}
+		foreach ($tsclass in $tsclasses)
+		{
+			$tswmis = get-wmiobject $tsclass.name
+			$fichero.writeline("__Terminal Server WMI Info, Class "+$tsclass.Name+"__")
+			$ficherohtml.writeline("<b>Terminal Server WMI Info, Class "+$tsclass.Name+"</b><br>")
+			foreach ($tswmi in $tswmis)
+			{
+				$tswmi.psobject.properties | ? {$_.Name -notlike "*__*" -and $_.value -notlike "*System*" -and $_.value -notlike "*\\*"} | foreach {$fichero.writeline($_.Name +" | "+ $_.Value);$ficherohtml.writeline($_.Name +" | "+ $_.Value+"<br>")}
+				$fichero.writeline("...............")
+				$ficherohtml.writeline("...............<br>")
+			}
+			$fichero.writeline("---------------")
+			$ficherohtml.writeline("---------------<br>")
+		}
+	}
+}
+
+$npsservices = @()
+$npsservices += (get-service -name "*ias*" | ? {$_.Status -eq "Running"})
+if($npsservices.count -gt 0 -and (get-service -name "*ias*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$indexnps = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#NPS")
+	$ficherohtml.writeline("<A name=NPS></A>")
+	$ficherohtml.writeline("<H3>NPS</H3>")
+	
+	$functions = $functions+"NPS "
+
+	$fichero.writeline("Dump Config NPS:")
+	$ficherohtml.writeline("Dump Config NPS:<br>")
+	$npsdump = netsh nps dump exportPSK=YES
+	foreach ($line in $npsdump)
+	{
+		$fichero.writeline($line)
+		$ficherohtml.writeline($line+"<br>")
+	}
+	$fichero.writeline("Dump Config NAP:")
+	$ficherohtml.writeline("Dump Config NAP:<br>")
+	$napdump = netsh nap dump
+	foreach ($line in $napdump)
+	{
+		$fichero.writeline($line)
+		$ficherohtml.writeline($line+"<br>")
+	}
+}
+
+$rasservices = @()
+$rasservices += (get-service -name "*RemoteAccess*" | ? {$_.Status -eq "Running"})
+if($rasservices.count -gt 0 -and (get-service -name "*RemoteAccess*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$indexras = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#RAS")
+	$ficherohtml.writeline("<A name=RAS></A>")
+	$ficherohtml.writeline("<H3>RAS</H3>")
+	
+	$functions = $functions+"RAS "
+
+	$rasdump = netsh ras dump
+	foreach ($line in $rasdump)
+	{
+		$fichero.writeline($line)
+		$ficherohtml.writeline($line+"<br>")
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Services")
+$ficherohtml.writeline("<A name=Services></A>")
+$ficherohtml.writeline("<H3>Services</H3>")
+
+$fichero.writeline("__Running Services:__")
+$ficherohtml.writeline("<b>Running Services:</b><br>")
+
+$servicios = Get-WmiObject -Class Win32_Service | ? {($_.State -eq "Running") -and ($_.Name -ne "SamSs" -and $_.Name -ne "UxSms" -and $_.Name -ne "PolicyAgent" -and $_.Name -ne "lmhosts" -and $_.Name -ne "iphlpsvc" -and $_.Name -ne "COMSysApp" -and $_.Name -ne "RpcEptMapper" -and $_.Name -ne "gpsvc" -and $_.Name -ne "TrkWks" -and $_.Name -ne "Dhcp" -and $_.Name -ne "Dnscache" -and $_.Name -ne "Spooler" -and $_.Name -ne "Netman" -and $_.Name -ne "SessionEnv" -and $_.Name -ne "MSDTC" -and $_.Name -ne "ShellHWDetection" -and $_.Name -ne "Power" -and $_.Name -ne "LanmanWorkstation" -and $_.Name -ne "AeLookupSvc" -and $_.Name -ne "MpsSvc" -and $_.Name -ne "W32Time" -and $_.Name -ne "fdPHost" -and $_.Name -ne "Appinfo" -and $_.Name -ne "DcomLaunch" -and $_.Name -ne "TrustedInstaller" -and $_.Name -ne "Winmgmt" -and $_.Name -ne "RpcSs" -and $_.Name -ne "IKEEXT" -and $_.Name -ne "BFE" -and $_.Name -ne "Netlogon" -and $_.Name -ne "PlugPlay" -and $_.Name -ne "Schedule" -and $_.Name -ne "CertPropSvc" -and $_.Name -ne "sppsvc" -and $_.Name -ne "NlaSvc" -and $_.Name -ne "UmRdpService" -and $_.Name -ne "eventlog" -and $_.Name -ne "RemoteRegistry" -and $_.Name -ne "AppHostSvc" -and $_.Name -ne "FontCache" -and $_.Name -ne "DPS" -and $_.Name -ne "netprofm" -and $_.Name -ne "SENS" -and $_.Name -ne "ProfSvc" -and $_.Name -ne "NetTcpPortSharing" -and $_.Name -ne "WPDBusEnum" -and $_.Name -ne "nsi" -and $_.Name -ne "WAS" -and $_.Name -ne "CryptSvc" -and $_.Name -ne "TermService" -and $_.Name -ne "LanmanServer" -and $_.Name -ne "EventSystem" -and $_.Name -ne "VMTools" -and $_.Name -ne "wuauserv" -and $_.Name -ne "NetPipeActivator" -and $_.Name -ne "NetTcpActivator" -and $_.Name -ne "WinRM" -and $_.Name -ne "wmiApSrv" -and $_.Name -ne "Alerter" -and $_.Name -ne "AudioSrv" -and $_.Name -ne "Browser" -and $_.Name -ne "dmserver" -and $_.Name -ne "FontCache3.0.0.0" -and $_.Name -ne "HTTPFilter" -and $_.Name -ne "Messenger" -and $_.Name -ne "Nla" -and $_.Name -ne "ProtectedStorage" -and $_.Name -ne "seclogon" -and $_.Name -ne "TapiSrv " -and $_.Name -ne "Themes" -and $_.Name -ne "UPHClean" -and $_.Name -ne "wlidsvc" -and $_.Name -ne "Wmi" -and $_.Name -ne "ERSvc" -and $_.Name -ne "helpsvc" -and $_.Name -ne "TapiSrv" -and $_.Name -ne "WZCSVC" -and $_.Name -ne "LicenseService" -and $_.Name -ne "hidserv" -and $_.Name -ne "AppMgmt" -and $_.Name -ne "VSS" -and $_.Name -ne "swprv" -and $_.Name -ne "WinHttpAutoProxySvc" -and $_.Name -ne "BITS" -and $_.Name -ne "SCardSvr" -and $_.Name -ne "wudfsvc" -and $_.Name -ne "WinHttpAutoProxySvc" -and $_.Name -ne "WinHttpAutoProxySvc" -and $_.Name -ne "NetMsmqActivator" -and $_.Name -ne "vds" -and $_.Name -ne "JavaQuickStarterService" -and $_.Name -ne "ALG" -and $_.Name -ne "Wecsvc" -and $_.Name -ne "WSearch" -and $_.Name -ne "dwmrcs" -and $_.Name -ne "AdobeARMservice" -and $_.Name -ne "SNMP" -and $_.Name -ne "bedbg" -and $_.Name -ne "BackupExecAgentAccelerator" -and $_.Name -ne "Backup Exec System Recovery" -and $_.Name -ne "McShield" -and $_.Name -ne "McTaskManager" -and $_.Name -ne "mfevtp" -and $_.Name -ne "MSSEARCH" -and $_.Name -ne "NSClientpp" -and $_.Name -ne "McAfeeFramework" -and $_.Name -ne "EFS" -and $_.Name -ne "IsmServ" -and $_.Name -ne "kdc" -and $_.Name -ne "NetBackup Client Service" -and $_.Name -ne "NetBackup Legacy Client Service" -and $_.Name -ne "NetBackup Legacy Network Service" -and $_.Name -ne "OpswareAgent" -and $_.Name -ne "PandoraFMSAgent" -and $_.Name -ne "sppuinotify" -and $_.Name -ne "VRTSpbx" -and $_.Name -ne "NtLmSsp" -and $_.Name -ne "VMUpgradeHelper")} | sort Caption
+
+foreach ($servicio in $servicios)
+{
+	$fichero.writeline($servicio.Caption)
+	$ficherohtml.writeline($servicio.Caption+"<br>")
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("!!#INFO Services")
+$ficherohtml.writeline("<A name=INFO Services></A>")
+$ficherohtml.writeline("<H4>INFO Services</H4>")
+$fichero.writeline("caption | Name | StartMode | StartName | PathName")
+$ficherohtml.writeline("caption | Name | StartMode | StartName | PathName<br>")
+foreach ($servicio in $servicios)
+{
+	$fichero.writeline($servicio.Caption+" | "+$servicio.Name+" | "+$servicio.StartMode+" | "+$servicio.StartName+" | "+$servicio.PathName)
+	$ficherohtml.writeline($servicio.Caption+" | "+$servicio.Name+" | "+$servicio.StartMode+" | "+$servicio.StartName+" | "+$servicio.PathName+"<br>")
+}
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+$fichero.writeline("INFO All Services")
+$ficherohtml.writeline("INFO All Services<br>")
+$allservices = Get-WmiObject -Class Win32_Service
+$fichero.writeline("caption | Name | StartMode | StartName | PathName")
+$ficherohtml.writeline("caption | Name | StartMode | StartName | PathName<br>")
+foreach ($servicio in $allservices)
+{
+	$fichero.writeline($servicio.Caption+" | "+$servicio.Name+" | "+$servicio.StartMode+" | "+$servicio.StartName+" | "+$servicio.PathName)
+	$ficherohtml.writeline($servicio.Caption+" | "+$servicio.Name+" | "+$servicio.StartMode+" | "+$servicio.StartName+" | "+$servicio.PathName+"<br>")
+}
+
+$fichero.writeline("")
+$fichero.writeline("S c r i p t D o c W i n d o w s S e r v e r, J o r g e N a v a r r o M a n z a n o")
+$ficherohtml.writeline("S c r i p t D o c W i n d o w s S e r v e r, J o r g e N a v a r r o M a n z a n o<br>")
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Local Users/Groups/Policies")
+$ficherohtml.writeline("<A name=Local Users/Groups/Policies></A>")
+$ficherohtml.writeline("<H3>Local Users/Groups/Policies</H3>")
+
+$domainrole = (Get-WmiObject -class Win32_ComputerSystem).domainrole
+
+if($domainrole -ne 4 -and $domainrole -ne 5)
+{
+	$fichero.writeline("__Users:__ Name | FullName | Description | Disabled")
+	$ficherohtml.writeline("<b>Users:</b> Name | FullName | Description | Disabled<br>")
+	foreach ($usuario in (Get-WmiObject -Class Win32_UserAccount -filter "LocalAccount = 'true'"))
+	{
+		$fichero.writeline($usuario.Name+" | "+$usuario.FullName+" | "+$usuario.Description+" | "+$usuario.Disabled)
+		$ficherohtml.writeline($usuario.Name+" | "+$usuario.FullName+" | "+$usuario.Description+" | "+$usuario.Disabled+"<br>")
+	}
+	
+	$fichero.writeline("............")
+	$ficherohtml.writeline("............<br>")
+	$fichero.writeline("__Groups:__ Name | Status | Description")
+	$ficherohtml.writeline("<b>Groups:</b> Name | Status | Description<br>")
+	foreach ($grupo in (Get-WmiObject -Class Win32_group -filter "LocalAccount = 'true'"))
+	{
+		$fichero.writeline($grupo.Name+" | "+$grupo.Status+" | "+$grupo.Description)
+		$ficherohtml.writeline($grupo.Name+" | "+$grupo.Status+" | "+$grupo.Description+"<br>")
+	}
+	
+	$fichero.writeline("............")
+	$ficherohtml.writeline("............<br>")
+	$fichero.writeline("Administrators:")
+	$ficherohtml.writeline("Administrators:<br>")
+	$groupadmin = (Get-WmiObject -Class Win32_group -filter "LocalAccount = 'true'" | ?{$_.SID -eq "S-1-5-32-544"}).Name
+	$administrators = net localgroup $groupadmin
+	foreach ($linea in $administrators)
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+	
+	$fichero.writeline("............")
+	$ficherohtml.writeline("............<br>")
+	$fichero.writeline("Local Account/Password Policies:")
+	$ficherohtml.writeline("Local Account/Password Policies:<br>")
+	$localpolicies = net accounts
+	foreach ($linea in $localpolicies)
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+}else{
+	$fichero.writeline("Domain Controller")
+	$ficherohtml.writeline("Domain Controller<br>")
+}
+
+if( ((get-pssnapin -Registered | ? {$_.Name -like "SqlServerCmdletSnapin*"}).name -like "SqlServerCmdletSnapin*") -or ((get-module -ListAvailable) | ? {$_.name -eq "SQLPS"}).name -eq "SQLPS")
+{
+	$indexsql_server = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#SQL Server")
+	$ficherohtml.writeline("<A name=SQL Server></A>")
+	$ficherohtml.writeline("<H3>SQL Server</H3>")
+	
+	if((get-pssnapin -Registered | ? {$_.Name -like "SqlServerCmdletSnapin*"}).name -like "SqlServerCmdletSnapin*")
+	{
+		Add-PSSnapin SqlServerCmdletSnapin*
+	}
+	if(((get-module -ListAvailable) | ? {$_.name -eq "SQLPS"}).name -eq "SQLPS")
+	{
+		import-module SQLPS -warningaction SilentlyContinue
+		if(test-path $env:userprofile\desktop)
+		{
+			cd $env:userprofile\desktop
+		}elseif(test-path $env:userprofile\escritorio)
+		{
+			cd $env:userprofile\escritorio
+		}else{
+			cd $home
+		}
+	}
+	
+	[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")
+	#query SQL
+	$sqlquery = "SELECT SERVERPROPERTY('MachineName') as Host, SERVERPROPERTY('InstanceName') as Instance, SERVERPROPERTY('Edition') as Edition, /*shows 32 bit or 64 bit*/ SERVERPROPERTY('ProductLevel') as ProductLevel, /* RTM or SP1 etc*/ Case SERVERPROPERTY('IsClustered') when 1 then 'CLUSTERED' else 'STANDALONE' end as ServerType, @@VERSION as VersionNumber, SERVERPROPERTY('ProductVersion') as 'Product version', SERVERPROPERTY('ServerName') as 'FULL_SQL_SERVER_NAME', SERVERPROPERTY('Collation') as Collation, @@language as idioma, SERVERPROPERTY('IsFullTextInstalled') as Full_text_installed , SERVERPROPERTY('IsIntegratedSecurityOnly') as Integrated_security, SERVERPROPERTY('SqlSortOrderName') as Sort_order_name
+				go
+				select * from sys.dm_os_sys_info
+				select crdate as [start time] from sysdatabases
+				where dbid = 2
+				SELECT * from sys.configurations order by NAME
+				go
+				SELECT l.name, l.denylogin, l.isntname, l.isntgroup, l.isntuser
+				FROM master.dbo.syslogins l
+				WHERE l.sysadmin = 1 OR l.securityadmin = 1
+				go
+				DBCC TRACESTATUS(-1);
+				go
+				SELECT name,compatibility_level,recovery_model_desc,state_desc  FROM sys.databases
+				go
+				EXEC dbo.sp_MSforeachdb 'use [?]; exec sp_spaceused'
+				go
+				EXEC dbo.sp_MSforeachdb 'exec sp_helpdb [?]'
+				go
+				SELECT db_name(database_id) as DatabaseName,name,type_desc,physical_name FROM sys.master_files
+				go
+				EXEC master.dbo.sp_MSforeachdb @command1 = 'USE [?] SELECT * FROM sys.filegroups'
+				go
+				SELECT db.name, case when MAX(b.backup_finish_date) is NULL then 'No Backup' else convert(varchar(100), MAX(b.backup_finish_date)) end AS last_backup_finish_date FROM sys.databases db
+				LEFT OUTER JOIN msdb.dbo.backupset b ON db.name = b.database_name AND b.type = 'D' WHERE db.database_id NOT IN (2) GROUP BY db.name ORDER BY 2 DESC
+				go
+				SELECT [sJOB].[job_id] AS [JobID], [sJOB].[name] AS [JobName], [sDBP].[name] AS [JobOwner], [sCAT].[name] AS [JobCategory], [sJOB].[description] AS [JobDescription], CASE [sJOB].[enabled] WHEN 1 THEN 'Yes' WHEN 0 THEN 'No' END AS [IsEnabled], [sJOB].[date_created] AS [JobCreatedOn], [sJOB].[date_modified] AS [JobLastModifiedOn], [sSVR].[name] AS [OriginatingServerName], [sJSTP].[step_id] AS [JobStartStepNo], [sJSTP].[step_name] AS [JobStartStepName], CASE WHEN [sSCH].[schedule_uid] IS NULL THEN 'No' ELSE 'Yes' END AS [IsScheduled], [sSCH].[schedule_uid] AS [JobScheduleID], [sSCH].[name] AS [JobScheduleName], CASE [sJOB].[delete_level] WHEN 0 THEN 'Never' WHEN 1 THEN 'On Success' WHEN 2 THEN 'On Failure' WHEN 3 THEN 'On Completion' END AS [JobDeletionCriterion] FROM [msdb].[dbo].[sysjobs] AS [sJOB] LEFT JOIN [msdb].[sys].[servers] AS [sSVR] ON [sJOB].[originating_server_id] = [sSVR].[server_id] LEFT JOIN [msdb].[dbo].[syscategories] AS [sCAT] ON [sJOB].[category_id] = [sCAT].[category_id] LEFT JOIN [msdb].[dbo].[sysjobsteps] AS [sJSTP] ON [sJOB].[job_id] = [sJSTP].[job_id] AND [sJOB].[start_step_id] = [sJSTP].[step_id] LEFT JOIN [msdb].[sys].[database_principals] AS [sDBP] ON [sJOB].[owner_sid] = [sDBP].[sid] LEFT JOIN [msdb].[dbo].[sysjobschedules] AS [sJOBSCH] ON [sJOB].[job_id] = [sJOBSCH].[job_id] LEFT JOIN [msdb].[dbo].[sysschedules] AS [sSCH] ON [sJOBSCH].[schedule_id] = [sSCH].[schedule_id] ORDER BY [JobName]
+				select * from sys.syslogins
+				go
+				EXEC dbo.sp_MSforeachdb 'use [?]; select db_name(); exec sp_helpuser'
+				go
+				exec sp_helpsrvrolemember
+				go
+				EXEC dbo.sp_MSforeachdb 'use [?]; select db_name(); exec sp_helprolemember '
+				go"
+	#check local instance default name
+	$sqlnodo = new-object ('Microsoft.SqlServer.Management.Smo.Server') $name
+	if($sqlnodo.Product -ne $null)
+	{
+		$sqlresult = invoke-sqlcmd -serverinstance $sqlnodo.name -query $sqlquery | out-string -stream
+		$fichero.writeline("__!!#"+$sqlnodo.name+" | Standalone__")
+		$ficherohtml.writeline("<b>"+$sqlnodo.name+" | Standalone</b><br>")
+		foreach ($linea in $sqlresult)
+		{
+			$fichero.writeline($linea)
+			$ficherohtml.writeline($linea+"<br>")
+		}
+		$fichero.writeline("....................")
+		$ficherohtml.writeline("....................<br>")
+	}
+	#check local instance not default name
+	if(test-path -path "HKLM:\Software\Microsoft\Microsoft SQL Server\Instance Names")
+	{
+		$ServerReg = [Microsoft.Win32.RegistryKey]::OpenRemoteBaseKey("LocalMachine",".")
+		$sql_reg = $ServerReg.OpenSubKey('Software\Microsoft\Microsoft SQL Server\Instance Names\SQL')
+		$instances = @($sql_reg.GetValueNames())
+		foreach ($instance in $instances)
+		{
+			if($instance -ne "MSSQLSERVER")
+			{
+				$sqlnodo = new-object ('Microsoft.SqlServer.Management.Smo.Server') $name"\"$instance
+				if($sqlnodo.Product -ne $null)
+				{
+					$sqlresult = invoke-sqlcmd -serverinstance $sqlnodo.name -query $sqlquery | out-string -stream
+					$fichero.writeline("__!!#"+$sqlnodo.name+" | Standalone__")
+					$ficherohtml.writeline("<b>"+$sqlnodo.name+" | Standalone</b><br>")
+					foreach ($linea in $sqlresult)
+					{
+						$fichero.writeline($linea)
+						$ficherohtml.writeline($linea+"<br>")
+					}
+					$fichero.writeline("....................")
+					$ficherohtml.writeline("....................<br>")
+				}
+			}
+		}
+	}
+	
+	#check cluster instance
+	if((get-command | ? {$_.Name -like "get-clusterresource"}).name -eq "get-clusterresource")
+	{
+		$clustergroups_sql = Get-ClusterResource | ? {$_.ResourceType -like "SQL Server"}
+		foreach ($clustergroup_sql in $clustergroups_sql)
+		{
+			$clusternetworkname_sql = Get-ClusterResource | ? {$_.OwnerGroup -like $clustergroup_sql.OwnerGroup -and $_.ResourceType -like "Network Name"}
+			$sqlnodo = new-object ('Microsoft.SqlServer.Management.Smo.Server') $clusternetworkname_sql.name
+			if($sqlnodo.Product -ne $null)
+			{
+				$sqlresult = invoke-sqlcmd -serverinstance $clusternetworkname_sql.name -query $sqlquery | out-string -stream
+				$sqlcluster = (get-cluster).name
+				$fichero.writeline("__!!#"+$clusternetworkname_sql.name+" | Cluster "+$sqlcluster+"__")
+				$ficherohtml.writeline("<b>"+$clusternetworkname_sql.name+" | Cluster "+$sqlcluster+"</b><br>")
+				foreach ($linea in $sqlresult)
+				{
+					$fichero.writeline($linea)
+					$ficherohtml.writeline($linea+"<br>")
+				}
+				$fichero.writeline("....................")
+				$ficherohtml.writeline("....................<br>")
+			}
+		}
+	}
+}
+
+if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "DNS"}).name -eq "DNS" -and ((test-path C:\Windows\System32\dnscmd.exe) -or (test-path $env:programfiles"\support tools\dnscmd.exe")) )
+{
+	$functions = $functions+"DNSServer "
+	$indexdns_server = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#DNS Server")
+	$ficherohtml.writeline("<A name=DNS Server></A>")
+	$ficherohtml.writeline("<H3>DNS Server</H3>")
+	
+	if(test-path C:\Windows\System32\dnscmd.exe)
+	{
+		C:\Windows\System32\dnscmd.exe /exportsettings
+		$dnsconfig = get-content C:\Windows\System32\dns\DnsSettings.txt
+	}elseif(test-path $env:programfiles"\support tools\dnscmd.exe")
+	{
+		$dnsconfig += & $env:programfiles"\support tools\dnscmd.exe" /Info
+		$dnsconfig += & $env:programfiles"\support tools\dnscmd.exe" /EnumZones
+	}
+
+	foreach($linea in $dnsconfig)
+	{
+			$fichero.writeline($linea)
+			$ficherohtml.writeline($linea+"<br>")
+	}
+}
+
+if(((Get-WmiObject -Class Win32_service | ? {$_.name -eq "DHCPServer"}).name -eq "DHCPServer") -and ((Get-WmiObject -Class Win32_service | ? {$_.name -eq "DHCPServer"}).state -eq "Running"))
+{
+	$functions = $functions+"DHCPServer "
+	$indexdhcp_server = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#DHCP Server")
+	$ficherohtml.writeline("<A name=DHCP Server></A>")
+	$ficherohtml.writeline("<H3>DHCP Server</H3>")
+	
+	$dhcpconfig = C:\Windows\System32\netsh.exe dhcp server dump
+	foreach($linea in $dhcpconfig)
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+}
+
+if((Get-WmiObject -class Win32_Printer -ErrorAction SilentlyContinue) -eq $null)
+{
+	if(($error[0] -like "*generic failure*") -or ($error[0] -like "*Error gen*"))
+	{
+		$error.Remove($error[0])
+	}
+}else{
+	$impresoras = (Get-WmiObject -Class Win32_Printer | ? {$_.Caption -notlike "*Microsoft XPS*" -and $_.Caption -notlike "*PDF*"})
+	if($impresoras -ne $null)
+	{
+		$impresoras = $impresoras | sort ShareName
+		$fichero.writeline("--------------------")
+		$fichero.writeline("!#Printers")
+		$ficherohtml.writeline("<A name=Printers></A>")
+		$ficherohtml.writeline("<H3>Printers</H3>")
+		
+		foreach($impresora in $impresoras)
+		{
+			$fichero.writeline($impresora.Caption+" | Location: "+$impresora.comment+" | ShareName: "+$impresora.sharename+" | SystemName: "+$impresora.systemname+" | Driver: "+$impresora.DriverName+" | PortName: "+$impresora.PortName)
+			$ficherohtml.writeline($impresora.Caption+" | Location: "+$impresora.comment+" | ShareName: "+$impresora.sharename+" | SystemName: "+$impresora.systemname+" | Driver: "+$impresora.DriverName+" | PortName: "+$impresora.PortName+"<br>")
+		}
+	}
+}
+
+if($domainrole -eq 4 -or $domainrole -eq 5)
+{
+	$functions = $functions+"DC "
+	$indexactive_directory = 1
+	$fichero.writeline("--------------------")
+	$fichero.writeline("!#Active Directory")
+	$ficherohtml.writeline("<A name=Active Directory></A>")
+	$ficherohtml.writeline("<H3>Active Directory</H3>")
+	
+	if((Get-Module -ListAvailable | ? {$_.Name -eq "Activedirectory"}).name -eq "Activedirectory")
+	{
+		Import-Module Activedirectory
+	}
+	
+	$infobosque = [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest()
+	$infodominio = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+	$fichero.writeline("Forest: "+$infodominio.forest+ " | Forest Level: "+$infobosque.ForestMode)
+	$fichero.writeline("Domain: "+$infodominio.Name+" | Domain Level: "+$infodominio.DomainMode)
+	$fichero.writeline("Father Domain: "+$infobosque.RootDomain)
+	$ficherohtml.writeline("Forest: "+$infodominio.forest+ " | Forest Level: "+$infobosque.ForestMode+"<br>")
+	$ficherohtml.writeline("Domain: "+$infodominio.Name+" | Domain Level: "+$infodominio.DomainMode+"<br>")
+	$ficherohtml.writeline("Father Domain: "+$infobosque.RootDomain+"<br>")
+	foreach($hijo in $infodominio.children)
+	{
+		$fichero.writeline("Child Domain: "+$hijo)
+		$ficherohtml.writeline("Child Domain: "+$hijo+"<br>")
+	}
+	$fichero.writeline("ROLES | Schema: "+$infobosque.SchemaRoleOwner+" ; Naming: "+$infobosque.NamingRoleOwner+" ; PDC: "+$infodominio.PdcRoleOwner+" ; RID: "+$infodominio.RidRoleOwner+" ; Infrastructure: "+$infodominio.InfrastructureRoleOwner)
+	$ficherohtml.writeline("ROLES | Schema: "+$infobosque.SchemaRoleOwner+" ; Naming: "+$infobosque.NamingRoleOwner+" ; PDC: "+$infodominio.PdcRoleOwner+" ; RID: "+$infodominio.RidRoleOwner+" ; Infrastructure: "+$infodominio.InfrastructureRoleOwner+"<br>")
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	if((get-command | ? {$_.name -eq "get-aduser"}).name -eq "get-aduser")
+	{
+		$adusuarios = (get-aduser -filter *).count
+		$fichero.write("User Count:"+$adusuarios)
+		$ficherohtml.write("User Count:"+$adusuarios)
+	}else{
+		$adusuarios = (dsquery user -name * -limit 0).count
+		$fichero.write("User Count:"+$adusuarios)
+		$ficherohtml.write("User Count:"+$adusuarios)
+	}
+	
+	if((get-command | ? {$_.name -eq "get-adgroup"}).name -eq "get-adgroup")
+	{
+		$adgroups = (get-adgroup -filter *).count
+		$fichero.write(" | Groups Count:"+$adgroups)
+		$ficherohtml.write(" | Groups Count:"+$adgroups)
+	}else{
+		$adusuarios = (dsquery group -name * -limit 0).count
+		$fichero.write(" | Groups Count:"+$adgroups)
+		$ficherohtml.write(" | Groups Count:"+$adgroups)
+	}
+	
+	if((get-command | ? {$_.name -eq "Get-ADComputer"}).name -eq "Get-ADComputer")
+	{
+		$adequipos = (Get-ADComputer -filter *).count
+		$fichero.write(" | Nodes Count:"+$adequipos)
+		$ficherohtml.write(" | Nodes Count:"+$adequipos)
+	}else{
+		$adequipos = (dsquery computer -name * -limit 0).count
+		$fichero.write(" | Nodes Count:"+$adequipos)
+		$ficherohtml.write(" | Nodes Count:"+$adequipos)
+	}
+	
+	if((get-command | ? {$_.name -eq "Get-ADComputer"}).name -eq "Get-ADComputer")
+	{
+		$adservers = (Get-ADComputer -Filter {operatingsystem -like "*server*"}).count
+		$fichero.write(" | Servers Count:"+$adservers)
+		$ficherohtml.write(" | Servers Count:"+$adservers)
+	}
+	
+	$fichero.write(" | DCs Count:"+$infodominio.domaincontrollers.count)
+	$ficherohtml.write(" | DCs Count:"+$infodominio.domaincontrollers.count)
+	
+	if((get-command | ? {$_.name -eq "Get-ADOrganizationalUnit"}).name -eq "Get-ADOrganizationalUnit")
+	{
+		$adous = (Get-ADOrganizationalUnit -filter *).count
+		$fichero.write(" | OUs Count:"+$adous)
+		$ficherohtml.write(" | OUs Count:"+$adous)
+	}else{
+		$adous = (dsquery ou -name * -limit 0).count
+		$fichero.write(" | OUs Count:"+$adous)
+		$ficherohtml.write(" | OUs Count:"+$adous)
+	}
+	
+	if((get-command | ? {$_.name -eq "Get-gpo"}).name -eq "Get-gpo")
+	{
+		$adgpos = (Get-gpo -all).count
+		$fichero.write(" | GPOs Count:"+$adgpos)
+		$ficherohtml.write(" | GPOs Count:"+$adgpos)
+	}
+	else
+	{
+		$adgpos = (DSQuery * -Filter "(ObjectCategory=GroupPolicyContainer)").count
+		$fichero.write(" | GPOs Count:"+$adgpos)
+		$ficherohtml.write(" | GPOs Count:"+$adgpos)
+	}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	
+	$dnszones = (Get-WmiObject -Namespace root\MicrosoftDNS -class MicrosoftDNS_Zone)
+	$dnszones_forward = $dnszones | ? {$_.zonetype -eq 1 -and $_.reverse -eq $false}
+	$dnszones_reverse = $dnszones | ? {$_.zonetype -eq 1 -and $_.reverse -eq $true}
+	$dnszones_conditional = $dnszones | ? {$_.zonetype -eq 4}
+	$dnszones_records = (Get-WmiObject -Namespace root\MicrosoftDNS -class MicrosoftDNS_ResourceRecord -filter "NOT ContainerName LIKE '..RootHints' AND NOT ContainerName LIKE '..Cache'")
+	$fichero.writeline("DNS records:"+$dnszones_records.count+" | DNS forward zones:"+$dnszones_forward.count+" | DNS reverse zones:"+$dnszones_reverse.count+" | DNS conditional forwarders:"+$dnszones_conditional.count)
+	$ficherohtml.writeline("DNS records:"+$dnszones_records.count+" | DNS forward zones:"+$dnszones_forward.count+" | DNS reverse zones:"+$dnszones_reverse.count+" | DNS conditional forwarders:"+$dnszones_conditional.count+"<br>")
+	
+	$dnsperformance = Get-WmiObject Win32_PerfFormattedData_DNS_DNS
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	$fichero.writeline("__DNS Statistics__ | TotalQueryReceived | TotalResponseSent | RecursiveQueries | RecursiveQueryFailure | RecursiveSendTimeOuts | DynamicUpdateReceived | DynamicUpdateRejected")
+	$ficherohtml.writeline("<b>DNS Statistics</b> | TotalQueryReceived | TotalResponseSent | RecursiveQueries | RecursiveQueryFailure | RecursiveSendTimeOuts | DynamicUpdateReceived | DynamicUpdateRejected<br>")
+	$fichero.writeline("DNS Statistics | "+$dnsperformance.TotalQueryReceived+" | "+$dnsperformance.TotalResponseSent+" | "+$dnsperformance.RecursiveQueries+" | "+$dnsperformance.RecursiveQueryFailure+" | "+$dnsperformance.RecursiveSendTimeOuts+" | "+$dnsperformance.DynamicUpdateReceived+" | "+$dnsperformance.DynamicUpdateRejected)
+	$ficherohtml.writeline("DNS Statistics | "+$dnsperformance.TotalQueryReceived+" | "+$dnsperformance.TotalResponseSent+" | "+$dnsperformance.RecursiveQueries+" | "+$dnsperformance.RecursiveQueryFailure+" | "+$dnsperformance.RecursiveSendTimeOuts+" | "+$dnsperformance.DynamicUpdateReceived+" | "+$dnsperformance.DynamicUpdateRejected+"<br>")
+	$fichero.writeline("__WINS Statistics__ | WINSLookupReceived | WINSResponseSent")
+	$ficherohtml.writeline("<b>WINS Statistics</b> | WINSLookupReceived | WINSResponseSent<br>")
+	$fichero.writeline("WINS Statistics | "+$dnsperformance.WINSLookupReceived+" | "+$dnsperformance.WINSResponseSent)
+	$ficherohtml.writeline("WINS Statistics | "+$dnsperformance.WINSLookupReceived+" | "+$dnsperformance.WINSResponseSent+"<br>")
+
+
+	$fichero.writeline("__DNS Performance__ | TotalQueryReceivedPersec | RecursiveQueriesPersec | DynamicUpdateReceivedPersec")
+	$ficherohtml.writeline("<b>DNS Performance</b> | TotalQueryReceivedPersec | RecursiveQueriesPersec | DynamicUpdateReceivedPersec<br>")
+	for($i=1; $i -le 5; $i++)
+	{
+		start-sleep 5
+		$dnsperformance = Get-WmiObject Win32_PerfFormattedData_DNS_DNS
+		$fichero.writeline("DNS Performance | " +$dnsperformance.TotalQueryReceivedPersec+" | "+$dnsperformance.RecursiveQueriesPersec+" | "+$dnsperformance.DynamicUpdateReceivedPersec)
+		$ficherohtml.writeline("DNS Performance | " +$dnsperformance.TotalQueryReceivedPersec+" | "+$dnsperformance.RecursiveQueriesPersec+" | "+$dnsperformance.DynamicUpdateReceivedPersec+"<br>")
+	}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	
+	$adperformance = Get-WmiObject Win32_PerfFormattedData_NTDS_NTDS
+	$adperformancedrainboundMB = [int]($adperformance.DRAInboundBytesTotalSinceBoot / 1024 /1024)
+	$adperformancedraoutboundMB = [int]($adperformance.DRAOutboundBytesTotalSinceBoot / 1024 /1024)
+	$adperformance_DRASyncRequestsMade = $adperformance.DRASyncRequestsMade
+	$fichero.writeline("__AD Statistics__ | DRAInboundTotalSinceBootMB | DRAOutboundTotalSinceBootMB | DRASyncRequestsMade")
+	$ficherohtml.writeline("<b>AD Statistics</b> | DRAInboundTotalSinceBootMB | DRAOutboundTotalSinceBootMB | DRASyncRequestsMade<br>")
+	$fichero.writeline("AD Statistics | "+$adperformancedrainboundMB+" | "+$adperformancedraoutboundMB+" | "+$adperformance_DRASyncRequestsMade)
+	$ficherohtml.writeline("AD Statistics | "+$adperformancedrainboundMB+" | "+$adperformancedraoutboundMB+" | "+$adperformance_DRASyncRequestsMade+"<br>")
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	
+	$fichero.writeline("__LDAP Performance__ | LDAPClientSessions | LDAPBindTimemiliseconds | LDAPSearchesPersec | LDAPWritesPersec")
+	$ficherohtml.writeline("<b>LDAP Performance</b> | LDAPClientSessions | LDAPBindTimemiliseconds | LDAPSearchesPersec | LDAPWritesPersec<br>")
+	for($i=1; $i -le 5; $i++)
+	{
+		start-sleep 5
+		$adperformance = Get-WmiObject Win32_PerfFormattedData_NTDS_NTDS
+		$fichero.writeline("LDAP Performance | "+$adperformance.LDAPClientSessions+" | "+$adperformance.LDAPBindTime+" | "+$adperformance.LDAPSearchesPersec+" | "+$adperformance.LDAPWritesPersec)
+		$ficherohtml.writeline("LDAP Performance | "+$adperformance.LDAPClientSessions+" | "+$adperformance.LDAPBindTime+" | "+$adperformance.LDAPSearchesPersec+" | "+$adperformance.LDAPWritesPersec+"<br>")
+	}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	
+	$fichero.writeline("__DS Performance__ | DSDirectoryReadsPersec | DSDirectorySearchesPersec | DSDirectoryWritesPersec")
+	$ficherohtml.writeline("<b>DS Performance</b> | DSDirectoryReadsPersec | DSDirectorySearchesPersec | DSDirectoryWritesPersec<br>")
+	for($i=1; $i -le 5; $i++)
+	{
+		start-sleep 5
+		$adperformance = Get-WmiObject Win32_PerfFormattedData_NTDS_NTDS
+		$fichero.writeline("DS Performance | "+$adperformance.DSDirectoryReadsPersec+" | "+$adperformance.DSDirectorySearchesPersec+" | "+$adperformance.DSDirectoryWritesPersec)
+		$ficherohtml.writeline("DS Performance "+$adperformance.DSDirectoryReadsPersec+" | "+$adperformance.DSDirectorySearchesPersec+" | "+$adperformance.DSDirectoryWritesPersec+"<br>")
+	}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	
+	$fichero.writeline("ATQ https://blogs.technet.microsoft.com/askds/2014/10/24/understanding-atq-performance-counters-yet-another-twist-in-the-world-of-tlas/")
+	$ficherohtml.writeline("ATQ https://blogs.technet.microsoft.com/askds/2014/10/24/understanding-atq-performance-counters-yet-another-twist-in-the-world-of-tlas/<br>")
+	$fichero.writeline("__ATQ Performance__ | ATQEstimatedQueueDelay | ATQOutstandingQueuedRequests | ATQRequestLatency | ATQThreadsTotal")
+	$ficherohtml.writeline("<b>ATQ Performance</b> | ATQEstimatedQueueDelay | ATQOutstandingQueuedRequests | ATQRequestLatency | ATQThreadsTotal<br>")
+	for($i=1; $i -le 5; $i++)
+	{
+		start-sleep 5
+		$adperformance = Get-WmiObject Win32_PerfFormattedData_NTDS_NTDS
+		$fichero.writeline("ATQ Performance | "+$adperformance.ATQEstimatedQueueDelay+" | "+$adperformance.ATQOutstandingQueuedRequests+" |"+$adperformance.ATQRequestLatency+" | "+$adperformance.ATQThreadsTotal)
+		$ficherohtml.writeline("ATQ Performance | "+$adperformance.ATQEstimatedQueueDelay+" | "+$adperformance.ATQOutstandingQueuedRequests+" |"+$adperformance.ATQRequestLatency+" | "+$adperformance.ATQThreadsTotal+"<br>")
+	}
+	
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	$fichero.writeline("!!#DCS: ")
+	$ficherohtml.writeline("<A name=DCS></A>")
+	$ficherohtml.writeline("<H4>DCS</H4>")
+	foreach ($dc in $infodominio.domaincontrollers | sort Name)
+	{
+		$fichero.writeline($dc.Name+" | Site: "+$dc.SiteName+" | OSVersion: "+$dc.OSVersion+" | IP: "+$dc.IPAddress)
+		$ficherohtml.writeline($dc.Name+" | Site: "+$dc.SiteName+" | OSVersion: "+$dc.OSVersion+" | IP: "+$dc.IPAddress+"<br>")
+	}
+	$fichero.writeline("")
+	$ficherohtml.writeline("<br>")
+	$fichero.writeline("!!#Sites: ")
+	$ficherohtml.writeline("<A name=Sites></A>")
+	$ficherohtml.writeline("<H4>Sites</H4>")
+	foreach ($site in $infobosque.sites | Sort Name)
+	{
+		if($site.domains[0].name -eq $infodominio.Name)
+		{
+			$fichero.write("Site: "+$site.Name+" | DCS: ")
+			$ficherohtml.write("Site: "+$site.Name+" | DCS:")
+			foreach ($dc in $site.servers)
+			{
+				$fichero.write($dc.name+" ; ")
+				$ficherohtml.write($dc.name+" ; ")
+			}
+			$fichero.writeline("")
+			$ficherohtml.writeline("<br>")
+			foreach ($subred in $site.subnets | Sort Name)
+			{
+				$fichero.write($subred.Name+" ; ")
+				$ficherohtml.write($subred.Name+" ; ")
+			}
+			$fichero.writeline("")
+			$ficherohtml.writeline("<br>")
+			$fichero.write("ADjacentSites: ")
+			$ficherohtml.write("ADjacentSites: ")
+			foreach ($adjsite in $site.AdjacentSites)
+			{
+				$fichero.write($adjsite.Name+ " ; ")
+				$ficherohtml.write($adjsite.Name+" ; ")
+			}
+			$fichero.write("|")
+			$ficherohtml.write("|")
+			$fichero.write("SiteLinks: ")
+			$ficherohtml.write("SiteLinks: ")
+			foreach ($sitelink in $site.SiteLinks)
+			{
+				$fichero.write($sitelink.Name+ " ; ")
+				$ficherohtml.write($sitelink.Name+ " ; ")
+			}
+			$fichero.write("|")
+			$ficherohtml.write("|")
+			$fichero.write("InterSiteTopologyGenerator: ")
+			$ficherohtml.write("InterSiteTopologyGenerator: ")
+			foreach ($InterSiteTopologyGenerator in $site.InterSiteTopologyGenerator)
+			{
+				$fichero.write($InterSiteTopologyGenerator.Name+ " ; ")
+				$ficherohtml.write($InterSiteTopologyGenerator.Name+ " ; ")
+			}
+			$fichero.write("|")
+			$ficherohtml.write("|")
+			$fichero.write("BridgeHeadServers: ")
+			$ficherohtml.write("BridgeHeadServers: ")
+			foreach ($bridgeheadserver in $site.BridgeHeadServers)
+			{
+				$fichero.write($bridgeheadserver.Name+ " ; ")
+				$ficherohtml.write($bridgeheadserver.Name+ " ; ")
+			}
+			$fichero.writeline("")
+			$ficherohtml.writeline("<br>")
+		}
+	}
+	$fichero.writeline("!!#Trusts:")
+	$ficherohtml.writeline("<A name=Trusts></A>")
+	$ficherohtml.writeline("<H4>Trusts</H4>")
+	$trusts = nltest /domain_trusts
+	foreach($linea in $trusts)
+	{
+		if($linea -notlike "*command completed*")
+		{
+			$fichero.writeline($linea)
+			$ficherohtml.writeline($linea+"<br>")
+		}
+	}
+	$fichero.writeline("!!#Authorized DHCP Servers:")
+	$ficherohtml.writeline("<A name=Authorized DHCP Servers></A>")
+	$ficherohtml.writeline("<H4>Authorized DHCP Servers</H4>")
+	$domaindn = (New-Object System.DirectoryServices.DirectoryEntry | select distinguishedname).distinguishedname
+	$dhcpservers = dsquery * "CN=NetServices,CN=Services,CN=configuration,$domaindn" -filter "(objectClass=DHCPclass)" -attr name | sort
+	foreach($dhcpserver in $dhcpservers)
+	{
+		if($dhcpserver -notlike "* name *" -and $dhcpserver -notlike "*DhcpRoot*")
+		{
+			$fichero.writeline($dhcpserver)
+			$ficherohtml.writeline($dhcpserver+"<br>")
+		}
+	}
+	if(test-path c:\windows\system32\dcdiag.exe)
+	{
+	$fichero.writeline("__search 'failed test'__")
+	$ficherohtml.writeline("<b>search 'failed test'</b><br>")
+	$dcdiag = c:\windows\system32\dcdiag.exe /c /v /skip:systemlog
+	foreach($linea in $dcdiag)
+	{
+		$fichero.writeline($linea)
+		$ficherohtml.writeline($linea+"<br>")
+	}
+	}
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Tasks")
+$ficherohtml.writeline("<A name=Tasks></A>")
+$ficherohtml.writeline("<H3>Tasks</H3>")
+
+$tareas = schtasks /query /FO csv /V | ConvertFrom-Csv | ? {$_.TaskName -notlike "*\Microsoft*" -and $_.TaskName -notlike "*TaskName*" -and $_."Nombre de tarea" -notlike "*\Microsoft*" -and $_."Nombre de tarea" -notlike "*Nombre de tarea*"}
+foreach($tarea in $tareas)
+{
+	$tarea.psobject.properties | foreach {$fichero.writeline($_.Name +" | "+ $_.Value);$ficherohtml.writeline($_.Name +" | "+ $_.Value+"<br>")}
+	$fichero.writeline("---------------")
+	$ficherohtml.writeline("---------------<br>")
+}
+
+$fichero.writeline("--------------------")
+$fichero.writeline("!#Review")
+$ficherohtml.writeline("<A name=Review></A>")
+$ficherohtml.writeline("<H3>Review</H3>")
+
+if($activadowindows -eq "NO")
+{
+	$fichero.writeline("Windows not Activated, evaluation end date: "+$evaluationenddate)
+	$ficherohtml.writeline("Windows not Activated, evaluation end date: "+$evaluationenddate+"<br>")
+}
+
+if(($so -like "*2003*" -and $sp -ne 2))
+{
+	$fichero.writeline("Windows 2003 without SP2")
+	$ficherohtml.writeline("Windows 2003 without SP2<br>")
+}
+if(($so -like "*2008 R2*" -and $sp -ne 1))
+{
+	$fichero.writeline("Windows 2008R2 without SP1")
+	$ficherohtml.writeline("Windows 2008R2 without SP1<br>")
+}
+if(($so -like "*2008*" -and $sp -ne 2 -and $so -notlike "*2008 R2*"))
+{
+	$fichero.writeline("Windows 2008 without SP2")
+	$ficherohtml.writeline("Windows 2008 without SP2<br>")
+}
+
+if($modelo -like "*vmware*" -and $vmwaretoolsinstalled -ne 1)
+{
+	$fichero.writeline("VM Server without VMware Tools installed")
+	$ficherohtml.writeline("VM Server without VMware Tools installed<br>")
+}
+
+if($modelo -like "*vmware*" -and $vmwaretoolsold -eq 1)
+{
+	$fichero.writeline("Installed VMware Tools older 2 years: "+$vmwaretd)
+	$ficherohtml.writeline("Installed VMware Tools older 2 years: "+$vmwaretd+"<br>")
+}
+
+$vmwaretoolsold = 1
+
+foreach($linea in $revision)
+{
+	$fichero.writeline($linea)
+	$ficherohtml.writeline($linea+"<br>")
+}
+
+$evt_eventlog6008 = get-eventlog system -after (get-date).addyears(-1) | ? {$_.source -eq "eventlog" -and $_.EventID -eq "6008"}
+if($evt_eventlog6008 -ne "" -and $evt_eventlog6008 -ne $null)
+{
+	foreach ($evt in $evt_eventlog6008)
+	{
+		$fichero.writeline("Unexpected restart(last year): "+$evt.TimeGenerated+" | "+$evt.message)
+		$ficherohtml.writeline("Unexpected restart(last year): "+$evt.TimeGenerated+" | "+$evt.message+"<br>")
+	}
+}
+
+#verwindows
+if($so -like "*2003*")
+{
+	$ginfoso = $ginfoso+"W2003"
+}elseif($so -like "*2008 R2*")
+{
+	$ginfoso = $ginfoso+"W2008R2"
+}elseif($so -like "*2008*")
+{
+	$ginfoso = $ginfoso+"W2008"
+}elseif($so -like "*2012 R2*")
+{
+	$ginfoso = $ginfoso+"W2012R2"
+}elseif($so -like "*2012*")
+{
+	$ginfoso = $ginfoso+"W2012"
+}elseif($so -like "*2016*")
+{
+	$ginfoso = $ginfoso+"W2016"
+}elseif($so -like "*2019*")
+{
+	$ginfoso = $ginfoso+"W2019"
+}else{$ginfoso = $ginfoso+$so}
+
+if($arq -like "*64*")
+{
+	$ginfoso = $ginfoso+"x64"
+}
+
+if($modelo -like "*vmware*")
+{
+	$ginfoPorV = $ginfoPorV+" Virtual |"
+}elseif($modelo -like "*Virtual Machine*")
+{
+	$ginfoPorV = $ginfoPorV+" Virtual HyperV |"
+}else{
+	$ginfoPorV = $ginfoPorV+" Physical |"
+}
+
+if((Get-WmiObject -class Win32_ComputerSystem).domainrole -gt 2)
+{
+	$ginfomember = $ginfomember+" "+$domain+" |"
+}else{
+	$ginfomember = $ginfomember+" Workgroup |"
+}
+
+#teamviewer
+$teamviewerservices = @()
+$teamviewerservices += (get-service  "*Teamviewer*" | ? {$_.Status -eq "Running"})
+if($teamviewerservices.count -gt 0 -and (get-service  "*Teamviewer*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$fichero.writeline("Teamviewer Installed and Running")
+	$ficherohtml.writeline("Teamviewer Installed and Running<br>")
+}
+
+#hbas count
+if($hba -eq 1)
+{
+	$ginfohwhba = $ginfohwhba+""+$hwhbas.count+" HBAs |"
+}
+
+#CA
+$caservices = @()
+$caservices += (get-service "*CertSvc*" | ? {$_.Status -eq "Running"})
+if($caservices.count -gt 0 -and (get-service -name "*CertSvc*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"CA "
+}
+
+#sql
+$sqlservices = @()
+$sqlservices += (get-service "*MSSQL*" | ? {$_.Status -eq "Running"})
+if($sqlservices.count -gt 0 -and (get-service "*MSSQL*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"SQLServer_"
+	$sqlinstances = @()
+	$sqlinstances = (get-itemproperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server').InstalledInstances
+	if($sqlinstances.count -ne $null)
+	{
+		$nsqlinstances = ($sqlinstances.count).tostring()
+	}
+	if($sqlinstances.count -gt 1)
+	{
+		$functions = $functions+$nsqlinstances+"_Instances "
+	}else{
+		$functions = $functions+"1_Instance "
+	}
+}
+
+#oracle
+$oracleservices = @()
+$oracleservices += (get-service "*Oracle*" | ? {$_.Status -eq "Running"})
+if($oracleservices.count -gt 0 -and (get-service -displayname "*Oracle*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Oracle "
+}
+
+#citrix
+$citrixservices = @()
+$citrixservices += (get-service -displayname "*Citrix*" | ? {$_.Status -eq "Running"})
+if($citrixservices.count -gt 0 -and (get-service -displayname "*Citrix*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Citrix "
+}
+
+#exchange
+$exchangeservices = @()
+$exchangeservices += (get-service -displayname "*Microsoft Exchange*" | ? {$_.Status -eq "Running"})
+if($exchangeservices.count -gt 0 -and (get-service -displayname "*Microsoft Exchange*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Exchange "
+}
+
+#apache
+$apacheservices = @()
+$apacheservices += (get-service -displayname "*Apache*" | ? {$_.Status -eq "Running"})
+if($apacheservices.count -gt 0 -and (get-service -displayname "*Apache*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Apache "
+}
+
+#vcenter
+$vcenterservices = @()
+$vcenterservices += (get-service -displayname "*VirtualCenter*" | ? {$_.Status -eq "Running"})
+if($vcenterservices.count -gt 0 -and (get-service -displayname "*VirtualCenter*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VMwarevCenter "
+}
+
+#vmwarewebclient
+$vmwarewebclient = @()
+$vmwarewebclient += (get-service -displayname "*VMware vSphere Web Client*" | ? {$_.Status -eq "Running"})
+if($vmwarewebclient.count -gt 0 -and (get-service -displayname "*VMware vSphere Web Client*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VMwarewebclient "
+}
+
+#vmwaresso
+$vmwaresso = @()
+$vmwaresso += (get-service -displayname "*VMware Identity Management Service*" | ? {$_.Status -eq "Running"})
+if($vmwaresso.count -gt 0 -and (get-service -displayname "*VMware Identity Management Service*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VMwareSSO "
+}
+
+#vmwaresrm
+$vmwaresrmservices = @()
+$vmwaresrmservices += (get-service -displayname "*Site Recovery Manager*" | ? {$_.Status -eq "Running"})
+if($vmwaresrmservices.count -gt 0 -and (get-service -displayname "*Site Recovery Manager*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VMwareSRM "
+}
+
+#vmwareupdatemanager
+$vmwareumservices = @()
+$vmwareumservices += (get-service -displayname "*vSphere Update Manager*" | ? {$_.Status -eq "Running"})
+if($vmwareumservices.count -gt 0 -and (get-service -displayname "*vSphere Update Manager*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VMwareUpdateManager "
+}
+
+#iscsi
+$iscsiservices = @()
+$iscsiservices += (get-service -displayname "*iSCSI*" | ? {$_.Status -eq "Running"})
+if($iscsiservices.count -gt 0 -and (get-service -displayname "*iSCSI*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"iSCSI "
+}
+
+#adfs
+$adfsservices = @()
+$adfsservices += (get-service "*adfs*" | ? {$_.Status -eq "Running"})
+if($adfsservices.count -gt 0 -and (get-service "*adfs*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"ADFS "
+}
+
+#wsus
+$wsusservices = @()
+$wsusservices += (get-service "*WsusService*" | ? {$_.Status -eq "Running"})
+if($wsusservices.count -gt 0 -and (get-service "*WsusService*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"WSUS "
+}
+
+#symantec backup exec server
+$sbesservices = @()
+$sbesservices += (get-service "*BackupExecRPCService*" | ? {$_.Status -eq "Running"})
+if($sbesservices.count -gt 0 -and (get-service "*BackupExecRPCService*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"SymantecBackupExec "
+}
+
+#hp storage server management
+$hpstormanservices = @()
+$hpstormanservices += (get-service "*HPSSMgmt*" | ? {$_.Status -eq "Running"})
+if($hpstormanservices.count -gt 0 -and (get-service "*HPSSMgmt*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"HPStorageManagement "
+}
+
+#wins
+$winsservices = @()
+$winsservices += (get-service "*WINS*" | ? {$_.Status -eq "Running"})
+if($winsservices.count -gt 0 -and (get-service "*WINS*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"WINS "
+}
+
+#epo
+$eposervices = @()
+$eposervices += (get-service -displayname "*McAfee ePolicy Orchestrator*" | ? {$_.Status -eq "Running"})
+if($eposervices.count -gt 0 -and (get-service -displayname "*McAfee ePolicy Orchestrator*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"McafeeEPO "
+}
+
+#mysql
+$mysqlservices = @()
+$mysqlservices += (get-service  "*mysql*" | ? {$_.Status -eq "Running"})
+if($mysqlservices.count -gt 0 -and (get-service  "*mysql*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"MySQL "
+}
+
+#sql reporting services
+$reportsqlservices = @()
+$reportsqlservices += (get-service "*ReportServer*" | ? {$_.Status -eq "Running"})
+if($reportsqlservices.count -gt 0 -and (get-service "*ReportServer*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"ReportSQLServices "
+}
+
+#sharepoint
+$sharepointservices = @()
+$sharepointservices += (get-service -displayname "*sharepoint*" | ? {$_.Status -eq "Running"})
+if($sharepointservices.count -gt 0 -and (get-service -displayname "*sharepoint*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Sharepoint "
+}
+
+#lotusdominoserver
+$lotusdominoserver = @()
+$lotusdominoserver += (get-service -displayname "*Lotus Domino Server*" | ? {$_.Status -eq "Running"})
+if($lotusdominoserver.count -gt 0 -and (get-service -displayname "*Lotus Domino Server*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"LotusDominoServer "
+}
+
+#hpsitescope
+$hpsitescopeservices = @()
+$hpsitescopeservices += (get-service "*SiteScope*" | ? {$_.Status -eq "Running"})
+if($hpsitescopeservices.count -gt 0 -and (get-service  "*SiteScope*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"HPSitescope "
+}
+
+#sap
+$sapservices = @()
+$sapservices += (get-service "*sap*" | ? {$_.Status -eq "Running" -and $_.Name -ne "COMSysApp"})
+if($sapservices.count -gt 0 -and (get-service  "*sap*" | ? {$_.Status -eq "Running" -and $_.Name -ne "COMSysApp"}) -ne $null)
+{
+	$functions = $functions+"SAP "
+}
+
+#virtual server
+$virtualserver = @()
+$virtualserver += (get-service "*Virtual Server*" | ? {$_.Status -eq "Running"})
+if($virtualserver.count -gt 0 -and (get-service  "*Virtual Server*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"VirtualServer "
+}
+
+#i_mirth
+$mirthservices = @()
+$mirthservices += (get-service  "*mirth*" | ? {$_.Status -eq "Running"})
+if($mirthservices.count -gt 0 -and (get-service  "*mirth*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Mirth "
+}
+
+#quay
+$quayservices = @()
+$quayservices += (get-service  "*quay*" | ? {$_.Status -eq "Running"})
+if($quayservices.count -gt 0 -and (get-service  "*quay*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Quay "
+}
+
+#filezillaftpserver
+$filezillaftpservices = @()
+$filezillaftpservices += (get-service  "*FileZilla Server*" | ? {$_.Status -eq "Running"})
+if($filezillaftpservices.count -gt 0 -and (get-service  "*FileZilla Server*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"FileZillaFTPServer "
+}
+
+#RRAS
+$RRASservices = @()
+$RRASservices += (get-service  "RemoteAccess" | ? {$_.Status -eq "Running"})
+if($RRASservices.count -gt 0 -and (get-service  "RemoteAccess" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"RRAS "
+}
+
+#Meta4
+$meta4services = @()
+$meta4services += (get-service -displayname "*Meta4*" | ? {$_.Status -eq "Running"})
+if($meta4services.count -gt 0 -and (get-service -displayname "*Meta4*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Meta4 "
+}
+
+#Websphere
+$websphereservices = @()
+$websphereservices += (get-service -displayname "*WebSphere*" | ? {$_.Status -eq "Running"})
+if($websphereservices.count -gt 0 -and (get-service -displayname "*WebSphere*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"WebSphere "
+}
+
+#infovista
+$InfoVistaservices = @()
+$InfoVistaservices += (get-service -displayname "*InfoVista*" | ? {$_.Status -eq "Running"})
+if($InfoVistaservices.count -gt 0 -and (get-service -displayname "*InfoVista*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"InfoVista "
+}
+
+#salsa
+$salsaservices = @()
+$salsaservices += (get-service -displayname "*Salsa*" | ? {$_.Status -eq "Running"})
+if($salsaservices.count -gt 0 -and (get-service -displayname "*Salsa*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Salsa "
+}
+
+#zertoZVM
+$zertozvmservices = @()
+$zertozvmservices += (get-service "*zertoZVM*" | ? {$_.Status -eq "Running"})
+if($zertozvmservices.count -gt 0 -and (get-service "*ZertoZvm*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"ZertoZvm "
+}
+
+#veeam
+$veeamservices = @()
+$veeamservices += (get-service -displayname "*Veeam Backup Service*" | ? {$_.Status -eq "Running"})
+if($veeamservices.count -gt 0 -and (get-service -displayname "*Veeam Backup Service*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"Veeam "
+}
+
+#qlikviewserver
+$qlikviewserver = @()
+$qlikviewserver += (get-service -displayname "*QlikView Server*" | ? {$_.Status -eq "Running"})
+if($qlikviewserver.count -gt 0 -and (get-service -displayname "*QlikView Server*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"qlikviewserver "
+}
+
+#symantecantivirusconsole
+$symantecservices = @()
+$symantecservices += (get-service -displayname "*Symantec Endpoint Protection Manager*" | ? {$_.Status -eq "Running"})
+if($symantecservices.count -gt 0 -and (get-service -displayname "*Symantec Endpoint Protection Manager*" | ? {$_.Status -eq "Running"}) -ne $null)
+{
+	$functions = $functions+"SymantecAntivirusConsole "
+}
+
+#programs functions
+foreach ($programa in $programas)
+{
+	if($programa.displayname -like "*CA IT Client Manager*" -and $functions -notlike "*CAITcm*")
+	{
+		$functions = $functions+"CAITcm "
+	}
+}
+
+$functions = $functions+"| "
+
+#shares
+if($shares.count -gt 0)
+{
+	$nshares = ($shares.count).tostring()
+	if($sharessessions.count -ne $null)
+	{
+		$nsharessessions = ($sharessessions.count).tostring()
+	}else{
+		$nsharessessions = 0
+	}
+	$functions = $functions+$nshares+"Shares_"+$nsharessessions+"UsersConnected"
+}
+
+
+#iis sites and ftp sites count
+if((Get-WmiObject -Class Win32_service | ? {$_.name -eq "W3SVC"}).name -eq "W3SVC")
+{
+	$sitesIIS = @()
+	if($so -like "*2003*")
+	{
+		if(test-path C:\WINDOWS\system32\iisweb.vbs)
+		{
+			$sitesIIS += cscript c:\windows\system32\iisweb.vbs /query | select-string " STARTED "," INICIADO "
+		}
+	}else{
+		$sitesIIS += C:\Windows\system32\inetsrv\appcmd.exe list site | select-string ":http" | select-string ":Started"
+	}
+	$generalinfo = $generalinfo+"SitesWeb/SitesFTP: "+$sitesIIS.count+"/"+$sitesFTP.count
+}
+
+$ginfohw = $ginfohw+" | Disk Occupied/Total: "+$ocupadoparticiones+"GB/"+$totalparticiones+"GB"
+$ginfohw = $ginfohw+" | CPUcores/RAM: "+$cores+"/"+$ram+"MB"
+
+#net
+$ginfonet = $ginfonet+" | NET: "
+if($rcip -ne $null)
+{
+	$ginfonet = $ginfonet+"RCIP "+$rcip+" | "
+}
+$nets = Get-WmiObject Win32_NetworkAdapterConfiguration | select IPAddress,IPSubnet | ? {$_.Ipaddress -ne $null}
+foreach ($net in $nets)
+{
+	$i=0;
+	while($i -lt $net.ipaddress.count)
+	{
+		switch ($net.IPSubnet[$i])
+		{
+			"255.0.0.0" {$net_subnet = "8"}
+			"255.128.0.0" {$net_subnet = "9"}
+			"255.192.0.0" {$net_subnet = "10"}
+			"255.224.0.0" {$net_subnet = "11"}
+			"255.240.0.0" {$net_subnet = "12"}
+			"255.248.0.0" {$net_subnet = "13"}
+			"255.252.0.0" {$net_subnet = "14"}
+			"255.254.0.0" {$net_subnet = "15"}
+			"255.255.0.0" {$net_subnet = "16"}
+			"255.255.128.0" {$net_subnet = "17"}
+			"255.255.192.0" {$net_subnet = "18"}
+			"255.255.224.0" {$net_subnet = "19"}
+			"255.255.240.0" {$net_subnet = "20"}
+			"255.255.248.0" {$net_subnet = "21"}
+			"255.255.252.0" {$net_subnet = "22"}			
+			"255.255.254.0" {$net_subnet = "23"}
+			"255.255.255.0" {$net_subnet = "24"}
+			"255.255.255.128" {$net_subnet = "25"}
+			"255.255.255.192" {$net_subnet = "26"}
+			"255.255.255.224" {$net_subnet = "27"}
+			"255.255.255.240" {$net_subnet = "28"}
+			"255.255.255.248" {$net_subnet = "29"}
+			"255.255.255.252" {$net_subnet = "30"}
+			"255.255.255.254" {$net_subnet = "31"}
+			"255.255.255.255" {$net_subnet = "32"}
+			default {$net_subnet = $net.IPSubnet[$i]}
+			
+		}
+		if($net.IPaddress[$i] -notlike "*::*:*" -and $net.IPaddress[$i] -notlike "0.0.0.0")
+		{
+			$ginfonet = $ginfonet+$net.IPaddress[$i]+"/"+$net_subnet+";"
+		}
+		$i++
+	}
+}
+
+#cryptolocker
+$filescrypted = @()
+foreach($particion in $particiones)
+{
+	$filescrypted += cmd /C dir $particion.deviceID /b /s
+}
+$filescrypted = $filescrypted | select-string "crypted"
+if($filescrypted.count -gt 100)
+{
+	$cryptolocker = 1
+	$fichero.writeline("Possible cryptolocker(more than 100 files with crypted string in file name):")
+	foreach ($file in $fylescrypted)
+	{
+		$fichero.writeline($file)
+		$ficherohtml.writeline($file+"<br>")
+	}
+}
+
+$fichero.write("")
+$ficherohtml.write("")
+
+$fichero.writeline("")
+$ficherohtml.writeline("<br>")
+
+$fichero.writeline("")
+
+$fichero.close()
+$ficherohtml.close()
+
+$ficherogettxt = get-content $pwd\$name".txt"
+$ficherogethtml = get-content $pwd\$name".html"
+$fichero = New-Object System.IO.StreamWriter $pwd\$name".txt"
+$ficherohtml = New-Object System.IO.StreamWriter $pwd\$name".html"
+
+$fichero.writeline($name+" | Updated: "+ $fecha +" | User: "+$env:userdomain+"\"+$env:username)
+$fichero.write("(("+$name+"|"+$name+")) -> ")
+$fichero.writeline($ginfoso+$ginfoPorV+$ginfomember+$functions+$generalinfo+$ginfohwhba+$ginfohw+$ginfonet)
+if($cryptolocker -eq 1)
+{
+	$fichero.writeline("More than 100 files with crypted string in file name, check if cryptolocker is present with(change letter) Get-ChildItem C:\ -include *crypted* -recurse")
+}
+foreach ($line in $ficherogettxt)
+{
+	$fichero.writeline($line)
+}
+$fichero.writeline("")
+$fichero.writeline("Script Doc Windows Server, Jorge Navarro Manzano http://linkedin.com/in/jorgenavarromanzano")
+$fichero.writeline("http://github.com/jorgenavarromanzano")
+$fichero.close()
+
+$ficherohtml.writeline("<H1>"+$name+" Updated: "+ $fecha+" | User: "+$env:userdomain+"\"+$env:username+"</H1>")
+$ficherohtml.writeline($ginfoso+$ginfoPorV+$ginfomember+$functions+$generalinfo+"<br>")
+$ficherohtml.writeline($ginfohwhba+$ginfohw+$ginfonet+"<br><br>")
+if($cryptolocker -eq 1)
+{
+	$ficherohtml.writeline("More than 100 files with crypted string in file name, check if cryptolocker is present with(change letter) Get-ChildItem C:\ -include *crypted* -recurse<br>")
+}
+
+$ficherohtml.writeline("<a href=#Server Info>Server Info</a>  ")
+$ficherohtml.writeline("<a href=#ProductKeys>ProductKeys</a>  ")
+$ficherohtml.writeline("<a href=#Hardware>Hardware</a>  ")
+$ficherohtml.writeline("<a href=#Devices>Devices</a>  ")
+if($indexRemote_Console -eq 1)
+{
+	$ficherohtml.writeline("<a href=#Devices>Remote Console</a>  ")
+}
+$ficherohtml.writeline("<a href=#Performance>Performance</a><br>")
+$ficherohtml.writeline("<a href=#ENV>ENV</a>  ")
+$ficherohtml.writeline("<a href=#Eventlog>Eventlog</a>  ")
+$ficherohtml.writeline("<a href=#Startup Programs>Startup Programs</a>  ")
+$ficherohtml.writeline("<a href=#Net>Net</a>  ")
+$ficherohtml.writeline("<a href=#ipconfig>ipconfig</a>  ")
+if($indexnicteaming -eq 1)
+{
+	$ficherohtml.writeline("<a href=#nicteaming>nicteaming</a>  ")
+}
+$ficherohtml.writeline("<a href=#netstat>netstat</a>  ")
+if($indexmtu -eq 1)
+{
+	$ficherohtml.writeline("<a href=#MTU>MTU</a>  ")
+}
+$ficherohtml.writeline("<a href=#routes>routes</a>  ")
+$ficherohtml.writeline("<a href=#hosts file>hosts file</a>  ")
+$ficherohtml.writeline("<a href=#ntpclient>ntpclient</a>  ")
+$ficherohtml.writeline("<a href=#other>other</a>  ")
+$ficherohtml.writeline("<a href=#Shares-Mapped Drives>Shares-Mapped Drives</a>  ")
+$ficherohtml.writeline("<a href=#ODBC>ODBC</a><br>")
+$ficherohtml.writeline("<a href=#Roles-Features>Roles-Features</a>  ")
+$ficherohtml.writeline("<a href=#Programs>Programs</a>  ")
+$ficherohtml.writeline("<a href=#Updates>Updates</a>  ")
+$ficherohtml.writeline("<a href=#Services>Services</a>  ")
+$ficherohtml.writeline("<a href=#INFO Services>INFO Services</a><br>")
+$ficherohtml.writeline("<a href=#Local Users/Groups/Policies>Local Users/Groups/Policies</a>  ")
+$ficherohtml.writeline("<a href=#Printers>Printers</a>  ")
+$ficherohtml.writeline("<a href=#Tasks>Tasks</a>  ")
+$ficherohtml.writeline("<a href=#Review>Review</a><br>")
+
+$ficherohtml.writeline("<br>")
+
+if($indexiis -eq 1)
+{
+	$ficherohtml.writeline("<a href=#IIS-FTP-SMTP>IIS-FTP-SMTP</a>  ")
+}
+if($indexsql_server -eq 1)
+{
+	$ficherohtml.writeline("<a href=#SQL Server>SQL Server</a>  ")
+}
+if($indexdns_server -eq 1)
+{
+	$ficherohtml.writeline("<a href=#DNS Server>DNS Server</a>  ")
+}
+if($indexdhcp_server -eq 1)
+{
+	$ficherohtml.writeline("<a href=#DHCP Server>DHCP Server</a>  ")
+}
+if($indexactive_directory -eq 1)
+{
+	$ficherohtml.writeline("<br><a href=#Active Directory>Active Directory</a>  ")
+	$ficherohtml.writeline("<a href=#DCS>DCS</a>  ")
+	$ficherohtml.writeline("<a href=#Sites>Sites</a>  ")
+	$ficherohtml.writeline("<a href=#Trusts>Trusts</a>  ")
+	$ficherohtml.writeline("<a href=#Authorized DHCP Servers>Authorized DHCP Servers</a>  ")
+	$ficherohtml.writeline("<a href=#DCDIAG>DCDIAG</a><br>")
+}
+if($indexnlb -eq 1)
+{
+	$ficherohtml.writeline("<a href=#NLB>NLB</a>  ")
+}
+if($indexcluster -eq 1)
+{
+	$ficherohtml.writeline("<a href=#Cluster>Cluster</a>  ")
+}
+if($indexhyperv -eq 1)
+{
+	$ficherohtml.writeline("<a href=#HyperV>HyperV</a>  ")
+}
+if($indexrds -eq 1)
+{
+	$ficherohtml.writeline("<a href=#RDS>RDS</a>  ")
+}
+if($indexprintserver -eq 1)
+{
+	$ficherohtml.writeline("<a href=#PrintServer>PrintServer</a>  ")
+}
+if($indexterminal_server -eq 1)
+{
+	$ficherohtml.writeline("<a href=#Terminal Server>Terminal Server</a>  ")
+}
+if($indexnps -eq 1)
+{
+	$ficherohtml.writeline("<a href=#NPS>NPS</a>  ")
+}
+if($indexras -eq 1)
+{
+	$ficherohtml.writeline("<a href=#NPS>NPS</a>  ")
+}
+
+foreach ($line in $ficherogethtml)
+{
+	$ficherohtml.writeline($line)
+}
+$ficherohtml.writeline("")
+$ficherohtml.writeline("<H3>Info Script</H3>")
+$ficherohtml.writeline("Script Doc Windows Server, Jorge Navarro Manzano<br>https://linkedin.com/in/jorgenavarromanzano<br>http://github.com/jorgenavarromanzano<br>")
+$ficherohtml.close()
+
+if($transcript -ne 0)
+{
+	stop-transcript
+}
+
+$errores = $error | ? {$_ -notlike "*missing*" -and $_ -notlike "*falta*"}
+if($errores.count -gt 0 -or $errores -ne $null)
+{
+	write-host("ERRORS, review:") -foregroundcolor "red"
+	$errores
+}
+
+$datefile = get-date -format yyyyMMdd_HHmm
+mv $pwd\$name".txt" $pwd\$name"_"$datefile".txt"
+mv $pwd\$name".html" $pwd\$name"_"$datefile".html"
+
+if($outputsharefolder -ne $null)
+{
+	copy $pwd\$name"_"$datefile".txt" $outputsharefolder
+	copy $pwd\$name"_"$datefile".html" $outputsharefolder
+}
+
+if($locationexist -ne $null)
+{
+	if(!(test-path $locationdir"scriptdoc"))
+	{
+		mkdir $locationdir"scriptdoc"
+	}
+		copy $pwd\$name"_"$datefile".txt" $locationdir"scriptdoc"
+		copy $pwd\$name"_"$datefile".html" $locationdir"scriptdoc"
+}
+
