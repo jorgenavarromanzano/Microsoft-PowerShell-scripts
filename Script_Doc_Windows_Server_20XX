@@ -82,6 +82,7 @@ if($locationexist -ne $null)
 	#DCDIAG
 #Tasks
 #Review
+#eventviewer export app/system to $home\desktop
 #Server Description add manually
 #Service Check add manually
 #Notes add manually
@@ -2303,6 +2304,28 @@ if($evt_eventlog6008 -ne "" -and $evt_eventlog6008 -ne $null)
 	}
 }
 
+#eventviewer export
+if($so -like "*2003*")
+{
+	$eventviewerapp = Get-WmiObject -Class Win32_NTEventlogFile | ? {$_.LogfileName -eq "Application"}
+	$eventviewerapp.PSBase.Scope.Options.EnablePrivileges = $true
+	$eventviewerapp.BackupEventlog("$pwd\application.evt")
+	mv application.evt $name"_"$datefile"_"application.evt
+	$eventviewersys = Get-WmiObject -Class Win32_NTEventlogFile | ? {$_.LogfileName -eq "System"}
+	$eventviewersys.PSBase.Scope.Options.EnablePrivileges = $true
+	$eventviewersys.BackupEventlog("$pwd\system.evt")
+	mv system.evt $name"_"$datefile"_"system.evt
+}
+else
+{
+	$eventviewerapp = Get-WmiObject -Class Win32_NTEventlogFile | ? {$_.LogfileName -eq "Application"}
+	$eventviewerapp.BackupEventlog("$pwd\application.evtx")
+	mv application.evtx $name"_"$datefile"_"application.evtx
+	$eventviewersys = Get-WmiObject -Class Win32_NTEventlogFile | ? {$_.LogfileName -eq "System"}
+	$eventviewersys.BackupEventlog("$pwd\system.evtx")
+	mv system.evtx $name"_"$datefile"_"system.evtx
+}
+
 #verwindows
 if($so -like "*2003*")
 {
@@ -2963,4 +2986,5 @@ if($locationexist -ne $null)
 		copy $pwd\$name"_"$datefile".txt" $locationdir"scriptdoc"
 		copy $pwd\$name"_"$datefile".html" $locationdir"scriptdoc"
 }
+
 
